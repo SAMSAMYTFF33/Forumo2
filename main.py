@@ -37,7 +37,7 @@ def get_countdown_text() -> str:
 # ==========================================
 # الإعدادات الأساسية
 # ==========================================
-TELEGRAM_TOKEN = "898977979228:AAGVLVrLEjmHsghqmTaFH61zlfiFEkb0z3o"
+TELEGRAM_TOKEN = "8977979228:AAGVLVrLEjmHsghqmTaFH61zlfiFEkb0z3o"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 CAPTCHA_ALERT_CHAT_ID = 8486184645
