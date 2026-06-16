@@ -37,7 +37,7 @@ def get_countdown_text() -> str:
 # ==========================================
 # الإعدادات الأساسية
 # ==========================================
-TELEGRAM_TOKEN = "8960468660:AAFlqHUbIMmf08gOC7dFqv9ugD1QObQXxnw"
+TELEGRAM_TOKEN = "898977979228:AAGVLVrLEjmHsghqmTaFH61zlfiFEkb0z3o"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 CAPTCHA_ALERT_CHAT_ID = 8486184645
@@ -250,6 +250,10 @@ def handle_captcha_detected(email, context=""):
 # البروكسيات للحسابين المستثنيين
 # ==========================================
 def get_fastest_proxy_exempt(email):
+    """
+    يختبر البروكسيات الثابتة ويُرجع أسرع واحدة تعمل فعلاً.
+    إذا فشلت جميعها → يُرجع None (لا يُعيد بروكسياً ميتاً أبداً).
+    """
     proxies = ACCOUNT_PROXIES.get(email.lower().strip())
     if not proxies:
         return None
@@ -259,15 +263,49 @@ def get_fastest_proxy_exempt(email):
         try:
             proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{prx}"
             start = time.time()
-            requests.head(BASE_URL, headers=HEADERS,
-                          proxies={"http": proxy_url, "https": proxy_url}, timeout=3)
+            r = requests.head(BASE_URL, headers=HEADERS,
+                              proxies={"http": proxy_url, "https": proxy_url},
+                              timeout=4)
             elapsed = time.time() - start
-            if elapsed < best_time:
+            if r.status_code < 500 and elapsed < best_time:
                 best_time = elapsed
                 fastest = prx
         except Exception:
             continue
-    return fastest or random.choice(proxies)
+    # لا نُرجع بروكسياً عشوائياً — إذا كلها ميتة نُرجع None
+    return fastest
+
+
+def _session_has_live_proxy(session, email):
+    """
+    يتحقق أن الجلسة الحالية تمر عبر بروكسي حي فعلاً.
+    يُستخدم قبل كل اصطحاب للحسابين المستثنيين.
+    يُرجع True إذا البروكسي يعمل، False إذا لا يوجد بروكسي أو ميت.
+    """
+    email_lower = email.lower().strip()
+    if email_lower not in EXEMPT_ACCOUNTS:
+        return True  # الحسابات الأخرى لا تُطبّق عليها هذا الشرط
+
+    proxy_dict = getattr(session, 'proxies', {})
+    if not proxy_dict:
+        print(f"[PROXY-CHECK] ⛔ {email_lower}: لا يوجد بروكسي في الجلسة")
+        return False
+
+    proxy_url = proxy_dict.get("http") or proxy_dict.get("https")
+    if not proxy_url:
+        print(f"[PROXY-CHECK] ⛔ {email_lower}: proxies فارغ")
+        return False
+
+    try:
+        r = requests.head(BASE_URL, headers=HEADERS,
+                          proxies={"http": proxy_url, "https": proxy_url},
+                          timeout=5)
+        if r.status_code < 500:
+            print(f"[PROXY-CHECK] ✅ {email_lower}: البروكسي حي")
+            return True
+    except Exception as ex:
+        print(f"[PROXY-CHECK] ⛔ {email_lower}: البروكسي ميت — {ex}")
+    return False
 
 # ==========================================
 # إنشاء الجلسات
@@ -315,9 +353,12 @@ def get_authenticated_session(username, password):
     sess = requests.Session()
     if email_lower in EXEMPT_ACCOUNTS:
         fast_proxy = get_fastest_proxy_exempt(email_lower)
-        if fast_proxy:
-            proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{fast_proxy}"
-            sess.proxies = {"http": proxy_url, "https": proxy_url}
+        if not fast_proxy:
+            # شرط صارم: لا دخول بدون بروكسي حي
+            print(f"[SESSION] ⛔ {email_lower}: رُفض تسجيل الدخول — كل البروكسيات ميتة")
+            return None
+        proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{fast_proxy}"
+        sess.proxies = {"http": proxy_url, "https": proxy_url}
 
     login_data = {
         "signin[username]": username,
@@ -701,6 +742,20 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                         if should_take:
                             session = get_authenticated_session(email, password)
                             if session:
+                                # ── شرط صارم: الحسابان المستثنيان لا يصطحبان بدون بروكسي ──
+                                if e in EXEMPT_ACCOUNTS and not _session_has_live_proxy(session, e):
+                                    print(f"[HUNT] ⛔ {e}: رُفض الاصطحاب — لا يوجد بروكسي حي")
+                                    try:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"⛔ **{e.split('@')[0]}**: توقف الاصطحاب\n"
+                                            f"❌ لا يوجد بروكسي حي — لن يتم الاصطحاب حتى يعود البروكسي.",
+                                            parse_mode="Markdown"
+                                        )
+                                    except Exception:
+                                        pass
+                                    break  # لا نُكمل ولا نجرب مهام أخرى
+
                                 success = take_task_via_post(session, target_task['task_page'])
                                 if success:
                                     _bg_last_take[key] = time.time()
