@@ -1,4 +1,3 @@
-import base64
 import time
 import requests
 import random
@@ -13,29 +12,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timezone
 import traceback
 import sys
-
-# ==========================================
-# 🔐 دالة فك التشفير (مفتاح مدمج)
-# ==========================================
-def _obf_decrypt(encrypted_b64: str) -> str:
-    key = "f9K2m#Lz"
-    key_bytes = key.encode()
-    enc_bytes = base64.b64decode(encrypted_b64)
-    res = []
-    for i, b in enumerate(enc_bytes):
-        res.append(b ^ key_bytes[i % len(key_bytes)])
-    return bytes(res).decode('utf-8')
-
-# ==========================================
-# 🔑 البيانات الحساسة (مشفرة)
-# ==========================================
-GEMINI_API_KEY = _obf_decrypt("Vg58AVgWeU9XDnFzLGs6QjVAOVUEWSEDX0ARVAd6HTATAT93IVMWLQVYFERYbg==")
-GEMINI_MODEL = "gemini-2.5-flash"
-
-TELEGRAM_TOKEN = _obf_decrypt("Vg9+Al4afUpVAXFzLGsgPS0PIX9fUSAoVnAveDpnDzYLTA51H1UhS1FXOV1abg==")
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-
-CAPTCHA_ALERT_CHAT_ID = int(_obf_decrypt("Vg1zBFwbeExSDA=="))
 
 # ==========================================
 # ⏳ العد التنازلي (24 ساعة من لحظة تشغيل البوت)
@@ -61,15 +37,8 @@ def get_countdown_text() -> str:
 # ==========================================
 # الإعدادات الأساسية
 # ==========================================
-BASE_URL = "https://forumok.com"
-LOGIN_URL = "https://forumok.com/login"
-TARGET_URL = "https://forumok.com/orders-search/socio"
-STATS_URL = "https://forumok.com/publisher-requests/socio/confirmed"
-CONFIRMED_URL = "https://forumok.com/publisher-requests/socio/confirmed"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Referer": BASE_URL
-}
+TELEGRAM_TOKEN = "8960468660:AAFlqHUbIMmf08gOC7dFqv9ugD1QObQXxnw"
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # ==========================================
 # ⏰ إعدادات التوقيت العشوائي لإشعارات الكلية
@@ -100,6 +69,20 @@ def _all_notify_next_interval_seconds() -> int:
     extra_seconds = random.randint(0, 59)
     return minutes * 60 + extra_seconds
 
+# ==========================================
+# 🔔 إعدادات التنبيهات الخاصة
+# ==========================================
+CAPTCHA_ALERT_CHAT_ID = 8486184645
+BASE_URL = "https://forumok.com"
+LOGIN_URL = "https://forumok.com/login"
+TARGET_URL = "https://forumok.com/orders-search/socio"
+STATS_URL = "https://forumok.com/publisher-requests/socio/confirmed"
+CONFIRMED_URL = "https://forumok.com/publisher-requests/socio/confirmed"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": BASE_URL
+}
+
 def _safe_get(url, session=None, retries=3, **kwargs):
     req = session or requests
     kwargs.setdefault("timeout", 15)
@@ -113,8 +96,8 @@ def _safe_get(url, session=None, retries=3, **kwargs):
 # ==========================================
 # 🗄️ نظام التخزين المحلي (بديل السحابة)
 # ==========================================
-local_multi_accounts = {}
-local_user_settings = {}
+local_multi_accounts = {}  # chat_id -> [{'email': ..., 'password': ...}, ...]
+local_user_settings = {}   # chat_id -> {settings}
 
 def get_saved_multi_accounts(chat_id):
     return local_multi_accounts.get(int(chat_id), [])
@@ -154,25 +137,27 @@ def save_user_settings(chat_id, settings):
 # متغيرات الحالة العامة
 # ==========================================
 user_sessions = {}
-user_data_store = {}
+user_data_store = {}          # chat_id -> {email, password}
 user_numbered_tasks = {}
 user_transient_messages = {}
 user_auth_sessions = {}
 auth_sessions_lock = threading.Lock()
-logged_out_accounts = {}
+logged_out_accounts = {}      # chat_id -> set of email_lower
 logged_out_lock = threading.Lock()
 _handling_blocked = set()
 _handling_blocked_lock = threading.Lock()
 
-active_accounts = {}
+active_accounts = {}          # chat_id -> {email: {email, password}}
 active_accounts_lock = threading.Lock()
 
+# إعدادات مستقلة لكل حساب
 acct_notify_status = {}
 acct_all_notify_status = {}
 acct_notify_interval = {}
 acct_auto_hunt_status = {}
 acct_hunt_mode = {}
 
+# متغيرات الواجهة
 notify_status = {}
 all_notify_status = {}
 notify_interval = {}
@@ -314,6 +299,7 @@ def get_authenticated_session(username, password):
         except Exception:
             with auth_sessions_lock: user_auth_sessions.pop(email_lower, None)
 
+    # محاولة تسجيل دخول مباشر
     sess = requests.Session()
     login_data = {
         "signin[username]": username,
@@ -404,7 +390,7 @@ def get_site_data(username, password, chat_id):
                 if "taken-list" in row_classes or "gray-list" in row_classes: continue
                 cells = row.find_all("td")
                 if len(cells) < 9: continue
-
+                
                 action_cell = cells[-1]
                 take_link = action_cell.find("a", href=True)
                 if not take_link or action_cell.find("img", alt="take") is None: continue
@@ -677,6 +663,7 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
     e = email.lower().strip()
     settings = get_email_settings(email)
     
+    # إشعارات الكلية
     if settings['all_notify_status']:
         if key not in _bg_last_all_notify:
             first_interval = _all_notify_next_interval_seconds()
@@ -704,6 +691,7 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
     else:
         if key in _bg_last_all_notify: del _bg_last_all_notify[key]
 
+    # الإشعارات الدورية العادية
     if settings['notify_status'] and not settings['all_notify_status']:
         interval_secs = settings['notify_interval'] * 60
         if current_time - _bg_last_notify.get(key, 0) >= interval_secs:
@@ -724,6 +712,7 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                     try: bot.send_message(chat_id, msg, reply_markup=inline_markup)
                     except Exception: pass
 
+    # الاصطحاب التلقائي
     if settings['auto_hunt_status']:
         last_take = _bg_last_take.get(key, 0)
         if current_time - last_take >= TAKE_COOLDOWN:
@@ -1100,6 +1089,7 @@ def handle_bot_logic(message):
 def _handle_message_inner(message):
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
+    
     if text.lower() not in ["/start", "start"]:
         try: bot.delete_message(chat_id, message.message_id)
         except Exception: pass
