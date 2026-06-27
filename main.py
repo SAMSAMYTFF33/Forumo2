@@ -40,7 +40,7 @@ def get_countdown_text() -> str:
 TELEGRAM_TOKEN = "8930982354:AAGx5-7Ub0s6RzOtb1fottRMPUEhLK-tMH4"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-CAPTCHA_ALERT_CHAT_ID = 8486184645
+CAPTCHA_ALERT_CHAT_ID = 7638322813  # ✅ تم التصحيح
 
 BASE_URL      = "https://forumok.com"
 LOGIN_URL     = "https://forumok.com/login"
@@ -56,28 +56,45 @@ HEADERS = {
 TAKE_COOLDOWN = 60
 
 # ==========================================
-# البروكسيات الثابتة للحسابين المستثنيين
+# البروكسيات — كل حساب له بروكسيان مخصصان
+# صيغة كل بروكسي: (host:port, user, pass)
 # ==========================================
-EXEMPT_ACCOUNTS = ["france260026@gmail.com", "rossxpro26@gmail.com"]
+EXEMPT_ACCOUNTS = [
+    "miricanmoroco@gmail.com",
+    "rossxpro26@gmail.com",
+    "france260026@gmail.com",
+    "samsamytff@gmail.com",
+    "nurun2363@gmail.com",
+]
 
 ACCOUNT_PROXIES = {
-    "france260026@gmail.com": [
-        "38.154.203.95:5863", "198.105.121.200:6462", "64.137.96.74:6641",
-        "209.127.138.10:5784", "38.154.185.97:6370"
+    "miricanmoroco@gmail.com": [
+        ("64.137.96.74:6641",     "mnvfoqyw", "18kjk2uk8zmh"),
+        ("209.127.138.10:5784",   "dwzxxjfl", "e1in83kj5c8x"),
     ],
     "rossxpro26@gmail.com": [
-        "84.247.60.125:6095", "142.111.67.146:5611", "191.96.254.138:6185",
-        "31.58.9.4:6077", "64.137.10.153:5803"
-    ]
+        ("38.154.203.95:5863",    "gnvvestu", "rnghd1uipcqe"),
+        ("198.105.121.200:6462",  "ktsmocgr", "ciqqpzl8zewf"),
+    ],
+    "france260026@gmail.com": [
+        ("38.154.185.97:6370",    "kqdwgasw", "lqcuskfjlt0g"),
+        ("84.247.60.125:6095",    "kqdwgasw", "lqcuskfjlt0g"),
+    ],
+    "samsamytff@gmail.com": [
+        ("142.111.67.146:5611",   "jmirkzyy", "r12jkvs8m7gf"),
+        ("191.96.254.138:6185",   "smaaeujr", "876dhnbp5hch"),
+    ],
+    "nurun2363@gmail.com": [
+        ("31.58.9.4:6077",        "jmirkzyy", "r12jkvs8m7gf"),
+        ("64.137.10.153:5803",    "sjtsjaec", "b9veo1agajrv"),
+    ],
 }
-PROXY_USER = "sjtsjaec"
-PROXY_PASS = "b9veo1agajrv"
 
 # ==========================================
 # التخزين المحلي (بدون سحابة)
 # ==========================================
-local_multi_accounts = {}   # chat_id -> [{'email':..,'password':..}, ...]
-local_user_settings  = {}   # chat_id -> {settings}
+local_multi_accounts = {}
+local_user_settings  = {}
 
 def get_saved_multi_accounts(chat_id):
     return local_multi_accounts.get(int(chat_id), [])
@@ -107,7 +124,7 @@ def delete_multi_account(chat_id, email):
 # متغيرات الحالة العامة
 # ==========================================
 user_sessions           = {}
-user_data_store         = {}   # chat_id -> {email, password}
+user_data_store         = {}
 user_numbered_tasks     = {}
 user_transient_messages = {}
 
@@ -123,11 +140,9 @@ _handling_blocked_lock = threading.Lock()
 active_accounts      = {}
 active_accounts_lock = threading.Lock()
 
-# إعدادات لكل حساب (مفتاحها email)
 acct_auto_hunt_status = {}
 acct_hunt_mode        = {}
 
-# إعدادات الواجهة (مفتاحها chat_id)
 auto_hunt_status = {}
 hunt_mode        = {}
 last_take_time   = {}
@@ -247,21 +262,22 @@ def handle_captcha_detected(email, context=""):
         pass
 
 # ==========================================
-# البروكسيات للحسابين المستثنيين
+# البروكسيات — دوال محدثة تدعم user/pass منفصل لكل بروكسي
 # ==========================================
 def get_fastest_proxy_exempt(email):
     """
-    يختبر البروكسيات الثابتة ويُرجع أسرع واحدة تعمل فعلاً.
-    إذا فشلت جميعها → يُرجع None (لا يُعيد بروكسياً ميتاً أبداً).
+    يختبر البروكسيين المخصصين للحساب ويُرجع أسرع واحد يعمل فعلاً.
+    يُرجع (host:port, user, pass) أو None إذا كلها ميتة.
     """
     proxies = ACCOUNT_PROXIES.get(email.lower().strip())
     if not proxies:
         return None
     fastest = None
     best_time = float('inf')
-    for prx in proxies:
+    for prx_tuple in proxies:
+        host_port, prx_user, prx_pass = prx_tuple
         try:
-            proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{prx}"
+            proxy_url = f"http://{prx_user}:{prx_pass}@{host_port}"
             start = time.time()
             r = requests.head(BASE_URL, headers=HEADERS,
                               proxies={"http": proxy_url, "https": proxy_url},
@@ -269,22 +285,20 @@ def get_fastest_proxy_exempt(email):
             elapsed = time.time() - start
             if r.status_code < 500 and elapsed < best_time:
                 best_time = elapsed
-                fastest = prx
+                fastest = prx_tuple
         except Exception:
             continue
-    # لا نُرجع بروكسياً عشوائياً — إذا كلها ميتة نُرجع None
     return fastest
 
 
 def _session_has_live_proxy(session, email):
     """
-    يتحقق أن الجلسة الحالية تمر عبر بروكسي حي فعلاً.
-    يُستخدم قبل كل اصطحاب للحسابين المستثنيين.
-    يُرجع True إذا البروكسي يعمل، False إذا لا يوجد بروكسي أو ميت.
+    يتحقق أن الجلسة تمر عبر بروكسي حي.
+    يُرجع True إذا البروكسي يعمل، False إذا لا يوجد أو ميت.
     """
     email_lower = email.lower().strip()
     if email_lower not in EXEMPT_ACCOUNTS:
-        return True  # الحسابات الأخرى لا تُطبّق عليها هذا الشرط
+        return True
 
     proxy_dict = getattr(session, 'proxies', {})
     if not proxy_dict:
@@ -332,7 +346,8 @@ def get_authenticated_session(username, password):
             test_r = cached.get(BASE_URL, headers=HEADERS, timeout=8)
             page_state = detect_page_state(test_r.text)
             if page_state == "blocked":
-                threading.Thread(target=handle_blocked_account, args=(username,), daemon=True).start()
+                threading.Thread(target=handle_blocked_account,
+                                 args=(username,), daemon=True).start()
                 with auth_sessions_lock:
                     user_auth_sessions.pop(email_lower, None)
                 return None
@@ -354,10 +369,19 @@ def get_authenticated_session(username, password):
     if email_lower in EXEMPT_ACCOUNTS:
         fast_proxy = get_fastest_proxy_exempt(email_lower)
         if not fast_proxy:
-            # شرط صارم: لا دخول بدون بروكسي حي
             print(f"[SESSION] ⛔ {email_lower}: رُفض تسجيل الدخول — كل البروكسيات ميتة")
+            try:
+                bot.send_message(
+                    CAPTCHA_ALERT_CHAT_ID,
+                    f"⛔ **{email_lower.split('@')[0]}**: فشل تسجيل الدخول\n"
+                    f"❌ كل البروكسيات ميتة.",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
             return None
-        proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{fast_proxy}"
+        host_port, prx_user, prx_pass = fast_proxy
+        proxy_url = f"http://{prx_user}:{prx_pass}@{host_port}"
         sess.proxies = {"http": proxy_url, "https": proxy_url}
 
     login_data = {
@@ -433,10 +457,6 @@ def fetch_publisher_stats(session):
     return stats
 
 def get_site_data(username, password, chat_id):
-    """
-    جلب المهام الصالحة فقط (التي تملك زر اصطحاب حقيقي).
-    يفرز taken-list و gray-list تلقائياً.
-    """
     session = get_authenticated_session(username, password)
     if not session:
         return None, "AUTH_FAILED"
@@ -487,7 +507,6 @@ def get_site_data(username, password, chat_id):
                     if len(cells) < 9:
                         continue
 
-                    # فرز الصلاحية: يجب وجود زر اصطحاب فعلي
                     action_cell = cells[-1]
                     take_link = action_cell.find("a", href=True)
                     if not take_link or action_cell.find("img", alt="take") is None:
@@ -567,11 +586,7 @@ def get_site_data(username, password, chat_id):
 
 
 def take_task_via_post(session, task_page_url):
-    """
-    اصطحاب مهمة مع التحقق الحقيقي من نجاح الاصطحاب عبر order_id.
-    """
     try:
-        # استخراج order_id للتحقق
         order_id_for_verify = None
         id_match = re.search(r"/order[_/](\d+)", task_page_url)
         if not id_match:
@@ -742,19 +757,18 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                         if should_take:
                             session = get_authenticated_session(email, password)
                             if session:
-                                # ── شرط صارم: الحسابان المستثنيان لا يصطحبان بدون بروكسي ──
                                 if e in EXEMPT_ACCOUNTS and not _session_has_live_proxy(session, e):
                                     print(f"[HUNT] ⛔ {e}: رُفض الاصطحاب — لا يوجد بروكسي حي")
                                     try:
                                         bot.send_message(
-                                            chat_id,
+                                            CAPTCHA_ALERT_CHAT_ID,
                                             f"⛔ **{e.split('@')[0]}**: توقف الاصطحاب\n"
                                             f"❌ لا يوجد بروكسي حي — لن يتم الاصطحاب حتى يعود البروكسي.",
                                             parse_mode="Markdown"
                                         )
                                     except Exception:
                                         pass
-                                    break  # لا نُكمل ولا نجرب مهام أخرى
+                                    break
 
                                 success = take_task_via_post(session, target_task['task_page'])
                                 if success:
@@ -808,13 +822,11 @@ def _handle_callback_inner(call):
     data       = call.data
     message_id = call.message.message_id
 
-    # إلغاء أي انتظار
     if chat_id in user_sessions:
         step = user_sessions[chat_id].get('step', '')
         if step in ['WAITING_EMAIL', 'WAITING_PASSWORD', 'WAITING_DELETE_ACCOUNT']:
             del user_sessions[chat_id]
 
-    # ── تبديل الحساب ──
     if data.startswith("switch_acc_"):
         idx  = int(data.replace("switch_acc_", ""))
         saved = get_saved_multi_accounts(chat_id)
