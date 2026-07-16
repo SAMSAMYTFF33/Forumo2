@@ -15,22 +15,27 @@ import sys
 import html as html_module
 
 # ==========================================
-# ⏳ العد التنازلي
+# ⏳ العد التصاعدي
 # ==========================================
 BOT_START_TIME = time.time()
 
 def get_countdown_text() -> str:
     try:
         elapsed = time.time() - BOT_START_TIME
-        remaining = 24 * 3600 - elapsed
-        if remaining <= 0:
-            return "[0mini]"
-        remaining_int = int(remaining)
-        hours = remaining_int // 3600
-        minutes = (remaining_int % 3600) // 60
-        if hours >= 1:
-            return f"[{hours}h {minutes}mini]" if minutes > 0 else f"[{hours}h]"
-        return f"[{minutes}mini]"
+        total_minutes = int(elapsed) // 60
+        total_hours   = total_minutes // 60
+
+        if total_minutes < 60:
+            return f"[{total_minutes}mini]"
+
+        if total_hours < 24:
+            return f"[{total_hours}h]"
+
+        days  = total_hours // 24
+        hours = total_hours % 24
+        if hours > 0:
+            return f"[{days} يوم {hours}h]"
+        return f"[{days} يوم]"
     except Exception:
         return "[--]"
 
@@ -118,7 +123,7 @@ def refresh_fallback_proxies():
             lines = [p.strip() for p in r.text.strip().split('\n') if p.strip()]
             random.shuffle(lines)
             sample = lines[:80]  # أخذ 80 فقط لتخفيف الضغط على الاستضافة
-            
+
             working = []
             # استخدام 8 خيوط كحد أقصى لعدم استهلاك المعالج
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
@@ -131,7 +136,7 @@ def refresh_fallback_proxies():
                                 working.append(res)
                         if len(working) >= 4:
                             break
-            
+
             with fallback_lock:
                 for i, email in enumerate(EXEMPT_ACCOUNTS):
                     if i < len(working):
@@ -174,32 +179,32 @@ def get_fastest_proxy_exempt(email):
     """
     email_lower = email.lower().strip()
     proxies = ACCOUNT_PROXIES.get(email_lower)
-    
+
     # 1. فحص البروكسيات الثابتة بشكل متوازي (في نفس الوقت) وزيادة المهلة
     if proxies:
         fastest_url = None
         best_time = float('inf')
-        
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(proxies)) as executor:
             results = executor.map(check_single_exempt_proxy, proxies)
-            
+
         for proxy_url, elapsed in results:
             if proxy_url and elapsed < best_time:
                 best_time = elapsed
                 fastest_url = proxy_url
-                
+
         if fastest_url:
             return fastest_url
 
     # 2. اللجوء للنظام المجاني إذا ماتت كل البروكسيات الثابتة
     with fallback_lock:
         current_fallback = fallback_proxies.get(email_lower)
-    
+
     if current_fallback and test_single_free_proxy(current_fallback):
         return current_fallback
-    
+
     refresh_fallback_proxies()
-    
+
     with fallback_lock:
         return fallback_proxies.get(email_lower)
 
@@ -823,7 +828,7 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
     if settings['auto_hunt_status']:
         last_take = _bg_last_take.get(key, 0)
         if current_time - last_take >= TAKE_COOLDOWN:
-            if current_time - _bg_last_hunt.get(key, 0) >= 120:
+            if current_time - _bg_last_hunt.get(key, 0) >= 80:
                 _bg_last_hunt[key] = current_time
                 data, status = get_site_data(email, password, chat_id)
                 if status == "SUCCESS" and data and data['tasks']:
@@ -1089,7 +1094,7 @@ def _handle_callback_inner(call):
         bot.answer_callback_query(call.id)
         current_active = auto_hunt_status.get(chat_id, False)
         current_mode   = hunt_mode.get(chat_id, "")
-        
+
         if current_active and current_mode == "GT":
             auto_hunt_status[chat_id] = False
             status_msg = "🔴 تم إيقاف تصيد (أكبر من ساعتين) لجميع الحسابات المحفوظة"
@@ -1097,12 +1102,12 @@ def _handle_callback_inner(call):
             auto_hunt_status[chat_id] = True
             hunt_mode[chat_id] = "GT"
             status_msg = "✅ تم تفعيل تصيد (أكبر من ساعتين) لجميع الحسابات المحفوظة"
-            
+
         # تطبيق التعديلات على جميع الحسابات الخاصة بالمستخدم (chat_id)
         saved_accounts = get_saved_multi_accounts(chat_id)
         for acc in saved_accounts:
             sync_chat_settings_to_email(chat_id, acc['email'])
-            
+
         try:
             bot.edit_message_text(
                 f"⚡ **اصطحاب العمل**\n{status_msg}\nــــــــــــــــــ",
@@ -1117,7 +1122,7 @@ def _handle_callback_inner(call):
         bot.answer_callback_query(call.id)
         current_active = auto_hunt_status.get(chat_id, False)
         current_mode   = hunt_mode.get(chat_id, "")
-        
+
         if current_active and current_mode == "GTE":
             auto_hunt_status[chat_id] = False
             status_msg = "🔴 تم إيقاف تصيد (ساعتين فما فوق) لجميع الحسابات المحفوظة"
@@ -1125,12 +1130,12 @@ def _handle_callback_inner(call):
             auto_hunt_status[chat_id] = True
             hunt_mode[chat_id] = "GTE"
             status_msg = "✅ تم تفعيل تصيد (ساعتين فما فوق) لجميع الحسابات المحفوظة"
-            
+
         # تطبيق التعديلات على جميع الحسابات الخاصة بالمستخدم (chat_id)
         saved_accounts = get_saved_multi_accounts(chat_id)
         for acc in saved_accounts:
             sync_chat_settings_to_email(chat_id, acc['email'])
-            
+
         try:
             bot.edit_message_text(
                 f"⚡ **اصطحاب العمل**\n{status_msg}\nــــــــــــــــــ",
