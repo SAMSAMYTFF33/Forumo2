@@ -669,17 +669,16 @@ def get_site_data(username, password, chat_id):
         return None, "ERROR"
 
 def take_task_via_post(session, task_page_url):
+    """
+    يحاول اصطحاب مهمة ويرجع حالة دقيقة بناءً على رد الموقع الفعلي:
+    - "SUCCESS"   : ظهرت رسالة "Вы взяли задание в работу" (تم الاصطحاب فعلاً)
+    - "SAME_IP"   : ظهرت رسالة "C вашего компьютера задание уже выполняется" (نفس الـ IP مستخدم لمهمة قيد التنفيذ)
+    - "FAILED"    : أي حالة أخرى (فشل عام، صفحة غير متاحة، فورم غير موجود...)
+    """
     try:
-        order_id_for_verify = None
-        id_match = re.search(r"/order[_/](\d+)", task_page_url)
-        if not id_match:
-            id_match = re.search(r"/(\d+)/?(?:\?|$)", task_page_url)
-        if id_match:
-            order_id_for_verify = id_match.group(1)
-
         response = session.get(task_page_url, headers=HEADERS, timeout=10)
         if response.status_code != 200:
-            return False
+            return "FAILED"
 
         soup = BeautifulSoup(response.text, "html.parser")
         page_text = soup.get_text()
@@ -688,11 +687,11 @@ def take_task_via_post(session, task_page_url):
                          "order not found", "not found", "404"]
         for sig in not_available:
             if sig in page_text.lower():
-                return False
+                return "FAILED"
 
         form = soup.find("form", action=re.compile(r"batch|order_request"))
         if not form:
-            return False
+            return "FAILED"
 
         post_action_url = f"{BASE_URL}/order_request_socio/batch"
         if form.get('action'):
@@ -711,27 +710,26 @@ def take_task_via_post(session, task_page_url):
         elif form.find("input", name="ids[]"):
             post_data["ids[]"] = [form.find("input", name="ids[]").get("value", "")]
         else:
-            return False
+            return "FAILED"
 
         res = session.post(post_action_url, data=post_data, headers=HEADERS, timeout=10)
         if res.status_code != 200:
-            return False
+            return "FAILED"
 
-        time.sleep(1.5)
-        confirmed_r = session.get(CONFIRMED_URL, headers=HEADERS, timeout=10)
-        if confirmed_r.status_code == 200:
-            confirmed_soup = BeautifulSoup(confirmed_r.text, "html.parser")
-            table = confirmed_soup.find("table", id="publisher-requests")
-            if table:
-                rows = table.find_all("tr")
-                if rows and len(rows) > 1:
-                    if order_id_for_verify:
-                        return order_id_for_verify in confirmed_r.text
-                    data_rows = [r for r in rows if r.find_all("td")]
-                    return len(data_rows) > 0
-        return False
+        # 🆕 التحقق من رد الموقع الفعلي مباشرة (بدل الاعتماد على صفحة confirmed)
+        response_text = res.text
+
+        # نفس الـ IP مستخدم لمهمة قيد التنفيذ بالفعل
+        if "задание уже выполняется" in response_text:
+            return "SAME_IP"
+
+        # رسالة النجاح الرسمية من الموقع
+        if "взяли задание в работу" in response_text:
+            return "SUCCESS"
+
+        return "FAILED"
     except Exception:
-        return False
+        return "FAILED"
 
 # ==========================================
 # 🔥 الواجهات
@@ -820,6 +818,54 @@ def get_take_work_menu(chat_id):
 _bg_last_hunt = {}
 _bg_last_take = {}
 
+# 🆕 قائمة حظر مؤقتة لكل حساب: email_lower -> {task_id: وقت_الإضافة}
+_same_ip_blocked_tasks = {}
+_same_ip_blocked_lock  = threading.Lock()
+SAME_IP_BLOCK_EXPIRY   = 12 * 3600  # 12 ساعة
+
+
+def _is_task_blocked(email_lower, task_id):
+    """
+    يتحقق هل المهمة محظورة لهذا الحساب، وينظف أي IDs
+    تجاوزت 12 ساعة من وقت إضافتها لنفس الحساب في نفس اللحظة (بدون تعارض).
+    """
+    now = time.time()
+    with _same_ip_blocked_lock:
+        acc_map = _same_ip_blocked_tasks.get(email_lower)
+        if not acc_map:
+            return False
+
+        # تنظيف كل الـ IDs المنتهية لهذا الحساب
+        expired = [tid for tid, added_at in acc_map.items()
+                   if now - added_at >= SAME_IP_BLOCK_EXPIRY]
+        for tid in expired:
+            acc_map.pop(tid, None)
+        if not acc_map:
+            _same_ip_blocked_tasks.pop(email_lower, None)
+            return False
+
+        return task_id in acc_map
+
+
+def _add_blocked_task(email_lower, task_id):
+    """يضيف مهمة لقائمة حظر الحساب مع تسجيل وقت الإضافة."""
+    with _same_ip_blocked_lock:
+        _same_ip_blocked_tasks.setdefault(email_lower, {})[task_id] = time.time()
+
+
+def _extract_task_id(task_page_url):
+    """يستخرج رقم المهمة (task id) من رابط المهمة."""
+    m = re.search(r"/create-request/(\d+)", task_page_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"/order[_/](\d+)", task_page_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"/(\d+)/?(?:\?|$)", task_page_url)
+    if m:
+        return m.group(1)
+    return task_page_url  # fallback: الرابط نفسه لو ما قدرش يستخرج رقم
+
 def _bg_process_one_account_inner(chat_id, email, password, current_time):
     key = (chat_id, email)
     e = email.lower().strip()
@@ -834,14 +880,18 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                 if status == "SUCCESS" and data and data['tasks']:
                     mode = settings['hunt_mode']
                     for target_task in data['tasks']:
+                        task_id = _extract_task_id(target_task['task_page'])
+                        if _is_task_blocked(e, task_id):
+                            continue  # 🆕 هذا الحساب سبق ورجع له SAME_IP لهذي المهمة (ولسه ما مرش 12 ساعة)
+
                         task_minutes = target_task.get('minutes', 120)
                         should_take = ((mode == "GT"  and task_minutes > 120) or
                                        (mode == "GTE" and task_minutes >= 120))
                         if should_take:
                             session = get_authenticated_session(email, password, chat_id)
                             if session:
-                                success = take_task_via_post(session, target_task['task_page'])
-                                if success:
+                                take_status = take_task_via_post(session, target_task['task_page'])
+                                if take_status == "SUCCESS":
                                     _bg_last_take[key] = time.time()
                                     try:
                                         bot.send_message(
@@ -850,6 +900,19 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                                             f"👤 الحساب: {e.split('@')[0]}\n"
                                             f"💰 السعر: {target_task['price']} RUB\n"
                                             f"⏱️ الوقت: {target_task['duration']}"
+                                        )
+                                    except Exception:
+                                        pass
+                                elif take_status == "SAME_IP":
+                                    _add_blocked_task(e, task_id)
+                                    try:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"⚠️ **تنبيه: نفس عنوان IP**\n\n"
+                                            f"👤 الحساب: {e.split('@')[0]}\n"
+                                            f"🆔 رقم المهمة: {task_id}\n"
+                                            f"🛑 الموقع رفض الاصطحاب لأن نفس الـ IP يستخدمه حساب آخر لديك في مهمة قيد التنفيذ حالياً.\n"
+                                            f"🚫 لن يُعاد تجربة هذه المهمة من هذا الحساب لمدة 12 ساعة."
                                         )
                                     except Exception:
                                         pass
