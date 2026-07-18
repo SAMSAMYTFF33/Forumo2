@@ -671,9 +671,15 @@ def get_site_data(username, password, chat_id):
 def take_task_via_post(session, task_page_url):
     """
     يحاول اصطحاب مهمة ويرجع حالة دقيقة بناءً على رد الموقع الفعلي:
-    - "SUCCESS"   : ظهرت رسالة "Вы взяли задание в работу" (تم الاصطحاب فعلاً)
-    - "SAME_IP"   : ظهرت رسالة "C вашего компьютера задание уже выполняется" (نفس الـ IP مستخدم لمهمة قيد التنفيذ)
-    - "FAILED"    : أي حالة أخرى (فشل عام، صفحة غير متاحة، فورم غير موجود...)
+    - "SUCCESS"       : ظهرت رسالة "Вы взяли задание в работу" (تم الاصطحاب فعلاً)
+    - "SAME_IP"       : ظهرت رسالة "C вашего компьютера задание уже выполняется"
+                        (نفس الـ IP يستخدمه حساب آخر في مهمة قيد التنفيذ حالياً)
+    - "ALREADY_TAKEN" : ظهرت رسالة "Аккаунты не выбраны..."
+                        (هذا الحساب سبق ونفّذ هذه المهمة من قبل، فلم يعرض له الموقع أي حساب للاختيار)
+    - "FAILED"        : أي حالة أخرى (فشل عام، صفحة غير متاحة، فورم غير موجود...)
+
+    الحالتان "SAME_IP" و "ALREADY_TAKEN" تُعاملان بنفس منطق الحظر
+    (12 ساعة لهذا الحساب فقط)، لكن برسالة مختلفة توضح السبب الفعلي بدقة.
     """
     try:
         response = session.get(task_page_url, headers=HEADERS, timeout=10)
@@ -722,6 +728,10 @@ def take_task_via_post(session, task_page_url):
         # نفس الـ IP مستخدم لمهمة قيد التنفيذ بالفعل
         if "задание уже выполняется" in response_text:
             return "SAME_IP"
+
+        # 🆕 الموقع لم يعرض أي حساب للاختيار — هذا الحساب سبق ونفّذ نفس المهمة من قبل
+        if "Аккаунты не выбраны" in response_text:
+            return "ALREADY_TAKEN"
 
         # رسالة النجاح الرسمية من الموقع
         if "взяли задание в работу" in response_text:
@@ -882,7 +892,7 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                     for target_task in data['tasks']:
                         task_id = _extract_task_id(target_task['task_page'])
                         if _is_task_blocked(e, task_id):
-                            continue  # 🆕 هذا الحساب سبق ورجع له SAME_IP لهذي المهمة (ولسه ما مرش 12 ساعة)
+                            continue  # 🆕 هذا الحساب سبق ورجع له SAME_IP أو ALREADY_TAKEN لهذي المهمة (ولسه ما مرش 12 ساعة)
 
                         task_minutes = target_task.get('minutes', 120)
                         should_take = ((mode == "GT"  and task_minutes > 120) or
@@ -912,6 +922,19 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                                             f"👤 الحساب: {e.split('@')[0]}\n"
                                             f"🆔 رقم المهمة: {task_id}\n"
                                             f"🛑 الموقع رفض الاصطحاب لأن نفس الـ IP يستخدمه حساب آخر لديك في مهمة قيد التنفيذ حالياً.\n"
+                                            f"🚫 لن يُعاد تجربة هذه المهمة من هذا الحساب لمدة 12 ساعة."
+                                        )
+                                    except Exception:
+                                        pass
+                                elif take_status == "ALREADY_TAKEN":
+                                    _add_blocked_task(e, task_id)
+                                    try:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"⚠️ **تنبيه: هذه المهمة نُفّذت من قبل**\n\n"
+                                            f"👤 الحساب: {e.split('@')[0]}\n"
+                                            f"🆔 رقم المهمة: {task_id}\n"
+                                            f"🛑 الموقع لم يعرض أي حساب للاختيار، لأن هذا الحساب سبق ونفّذ هذه المهمة تحديداً من قبل.\n"
                                             f"🚫 لن يُعاد تجربة هذه المهمة من هذا الحساب لمدة 12 ساعة."
                                         )
                                     except Exception:
