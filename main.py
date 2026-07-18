@@ -15,22 +15,27 @@ import sys
 import html as html_module
 
 # ==========================================
-# ⏳ العد التنازلي
+# ⏳ العد التصاعدي
 # ==========================================
 BOT_START_TIME = time.time()
 
 def get_countdown_text() -> str:
     try:
         elapsed = time.time() - BOT_START_TIME
-        remaining = 24 * 3600 - elapsed
-        if remaining <= 0:
-            return "[0mini]"
-        remaining_int = int(remaining)
-        hours = remaining_int // 3600
-        minutes = (remaining_int % 3600) // 60
-        if hours >= 1:
-            return f"[{hours}h {minutes}mini]" if minutes > 0 else f"[{hours}h]"
-        return f"[{minutes}mini]"
+        total_minutes = int(elapsed) // 60
+        total_hours   = total_minutes // 60
+
+        if total_minutes < 60:
+            return f"[{total_minutes}mini]"
+
+        if total_hours < 24:
+            return f"[{total_hours}h]"
+
+        days  = total_hours // 24
+        hours = total_hours % 24
+        if hours > 0:
+            return f"[{days} يوم {hours}h]"
+        return f"[{days} يوم]"
     except Exception:
         return "[--]"
 
@@ -67,83 +72,21 @@ EXEMPT_ACCOUNTS = [
 
 ACCOUNT_PROXIES = {
     "france260026@gmail.com": [
-        "38.154.203.95:5863", "198.105.121.200:6462", "64.137.96.74:6641"
+        "31.59.20.176:6754", "31.56.127.193:7684", "45.38.107.97:6014"
     ],
     "rossxpro26@gmail.com": [
-        "209.127.138.10:5784", "38.154.185.97:6370", "84.247.60.125:6095"
+        "198.105.121.200:6462", "64.137.96.74:6641", "198.23.243.226:6361"
     ],
     "nurun2363@gmail.com": [
-        "142.111.67.146:5611", "191.96.254.138:6185"
+        "38.154.185.97:6370", "84.247.60.125:6095"
     ],
     "samsamytff@gmail.com": [
-        "31.58.9.4:6077", "64.137.10.153:5803", "104.239.107.47:5699"
+        "142.111.67.146:5611", "191.96.254.138:6185"
     ]
 }
 
-PROXY_USER = "sjtsjaec"
-PROXY_PASS = "b9veo1agajrv"
-
-# ==========================================
-# 🛡️ نظام البروكسيات المجانية الاحتياطي (الخفيف)
-# ==========================================
-FREE_PROXY_SOURCE = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
-fallback_proxies = {email: None for email in EXEMPT_ACCOUNTS}
-fallback_lock = threading.Lock()
-_is_fetching_fallback = False
-
-def test_single_free_proxy(proxy_url):
-    """فحص بروكسي مجاني واحد للتأكد من عمله"""
-    try:
-        r = requests.get("https://api.ipify.org?format=json", 
-                         proxies={"http": proxy_url, "https": proxy_url}, 
-                         timeout=5)
-        if r.status_code == 200:
-            return proxy_url
-    except Exception:
-        pass
-    return None
-
-def refresh_fallback_proxies():
-    """جلب 80 بروكسي واختبارها حتى إيجاد 4 صالحة فقط وتوزيعها بتساوٍ"""
-    global fallback_proxies, _is_fetching_fallback
-    with fallback_lock:
-        if _is_fetching_fallback:
-            return
-        _is_fetching_fallback = True
-
-    print("[FALLBACK] ⚠️ البروكسيات الثابتة ميتة! جاري فحص 80 بروكسي مجاني كحد أقصى...")
-    try:
-        r = requests.get(FREE_PROXY_SOURCE, timeout=10)
-        if r.status_code == 200:
-            lines = [p.strip() for p in r.text.strip().split('\n') if p.strip()]
-            random.shuffle(lines)
-            sample = lines[:80]  # أخذ 80 فقط لتخفيف الضغط على الاستضافة
-            
-            working = []
-            # استخدام 8 خيوط كحد أقصى لعدم استهلاك المعالج
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-                future_to_proxy = {executor.submit(test_single_free_proxy, f"http://{p}"): p for p in sample}
-                for future in concurrent.futures.as_completed(future_to_proxy):
-                    res = future.result()
-                    if res:
-                        with fallback_lock:
-                            if len(working) < 4:
-                                working.append(res)
-                        if len(working) >= 4:
-                            break
-            
-            with fallback_lock:
-                for i, email in enumerate(EXEMPT_ACCOUNTS):
-                    if i < len(working):
-                        fallback_proxies[email] = working[i]
-                    else:
-                        fallback_proxies[email] = None
-            print(f"[FALLBACK] ✅ تم التقاط {len(working)} بروكسيات مجانية وتوزيعها.")
-    except Exception as e:
-        print(f"[FALLBACK] ❌ خطأ في جلب البروكسيات: {e}")
-    finally:
-        with fallback_lock:
-            _is_fetching_fallback = False
+PROXY_USER = "dtzufdok"
+PROXY_PASS = "sp770jph5hm2"
 
 def check_single_exempt_proxy(prx):
     """دالة فرعية لفحص البروكسي الثابت وإرجاع الوقت والـ URL"""
@@ -156,10 +99,10 @@ def check_single_exempt_proxy(prx):
             proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{prx}"
 
         start = time.time()
-        # تم زيادة وقت المهلة هنا إلى 12 ثانية بناءً على طلبك
+        # تم تقليل المهلة هنا إلى 5 ثوانٍ لضمان سرعة الفحص والتنفيذ الفوري عند الحاجة
         r = requests.get(check_url, headers=HEADERS,
                          proxies={"http": proxy_url, "https": proxy_url},
-                         timeout=12)
+                         timeout=5)
         elapsed = time.time() - start
         if r.status_code == 200:
             return proxy_url, elapsed
@@ -167,56 +110,43 @@ def check_single_exempt_proxy(prx):
         pass
     return None, float('inf')
 
+# 🚀 تم تعديل الدالة لتقوم بالفحص اللحظي الفوري فائق السرعة بالتوازي عند طلب المهمة مباشرة
 def get_fastest_proxy_exempt(email):
     """
-    يختبر البروكسيات الثابتة بشكل متوازي وزيادة وقت المهلة.
-    إذا فشلت جميعها ← يلجأ فوراً للبروكسي المجاني المخصص للحساب.
+    تقوم بفحص جميع البروكسيات الثابتة للحساب بالتوازي فوراً عند استدعائها
+    وتحديد الأسرع لتمريره مباشرة دون انتظار مؤقتات أو كاش قديم.
     """
     email_lower = email.lower().strip()
     proxies = ACCOUNT_PROXIES.get(email_lower)
-    
-    # 1. فحص البروكسيات الثابتة بشكل متوازي (في نفس الوقت) وزيادة المهلة
-    if proxies:
-        fastest_url = None
-        best_time = float('inf')
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(proxies)) as executor:
-            results = executor.map(check_single_exempt_proxy, proxies)
-            
-        for proxy_url, elapsed in results:
-            if proxy_url and elapsed < best_time:
-                best_time = elapsed
-                fastest_url = proxy_url
-                
-        if fastest_url:
-            return fastest_url
+    if not proxies:
+        return None
 
-    # 2. اللجوء للنظام المجاني إذا ماتت كل البروكسيات الثابتة
-    with fallback_lock:
-        current_fallback = fallback_proxies.get(email_lower)
-    
-    if current_fallback and test_single_free_proxy(current_fallback):
-        return current_fallback
-    
-    refresh_fallback_proxies()
-    
-    with fallback_lock:
-        return fallback_proxies.get(email_lower)
+    fastest_url = None
+    best_time = float('inf')
+
+    # فحص متوازي فوري لكافة البروكسيات المتاحة للحساب للحصول على أسرع استجابة
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(proxies)) as executor:
+        results = executor.map(check_single_exempt_proxy, proxies)
+
+    for proxy_url, elapsed in results:
+        if proxy_url and elapsed < best_time:
+            best_time = elapsed
+            fastest_url = proxy_url
+
+    return fastest_url
 
 def notify_user_no_proxy(chat_id, email):
-    """إرسال تنبيه للمستخدم يفيد بالدخول بدون بروكسي"""
     try:
         account_label = email.split("@")[0]
         msg = f"⚠️ **تنبيه البروكسي**\n\n" \
               f"👤 الحساب: **{account_label}** (`{email}`)\n" \
-              f"🛑 جميع البروكسيات الثابتة والمجانية ميتة أو معطلة!\n" \
-              f"🔄 **تم تسجيل الدخول مباشرة بدون بروكسي بنجاح.**"
+              f"🛑 جميع البروكسيات الثابتة ميتة أو معطلة!\n" \
+              f"🚫 **تم إلغاء تسجيل الدخول لهذا الحساب — لا يُسمح بالدخول بدون بروكسي إطلاقاً.**"
         bot.send_message(chat_id, msg, parse_mode="Markdown")
     except Exception as e:
         print(f"[NOTIFY] خطأ في إرسال تنبيه البروكسي: {e}")
 
-def _session_has_live_proxy(session, email):
-    """يتحقق أن الجلسة الحالية تمر عبر بروكسي حي فعلاً قبل الاصطحاب"""
+def _session_has_proxy_attached(session, email):
     email_lower = email.lower().strip()
     if email_lower not in EXEMPT_ACCOUNTS:
         return True
@@ -226,24 +156,13 @@ def _session_has_live_proxy(session, email):
         return False
 
     proxy_url = proxy_dict.get("http") or proxy_dict.get("https")
-    if not proxy_url:
-        return False
-
-    try:
-        r = requests.get("https://api.ipify.org?format=json", headers=HEADERS,
-                          proxies={"http": proxy_url, "https": proxy_url},
-                          timeout=12)
-        if r.status_code == 200:
-            return True
-    except Exception:
-        pass
-    return False
+    return bool(proxy_url)
 
 # ==========================================
 # التخزين المحلي (بدون سحابة)
 # ==========================================
-local_multi_accounts = {}   # chat_id -> [{'email':..,'password':..}, ...]
-local_user_settings  = {}   # chat_id -> {settings}
+local_multi_accounts = {}   
+local_user_settings  = {}   
 
 def get_saved_multi_accounts(chat_id):
     return local_multi_accounts.get(int(chat_id), [])
@@ -426,7 +345,6 @@ def _safe_get(url, session=None, retries=3, **kwargs):
 def get_authenticated_session(username, password, chat_id=None):
     email_lower = username.lower().strip()
 
-    # جلسة محفوظة
     with auth_sessions_lock:
         cached = user_auth_sessions.get(email_lower)
     if cached:
@@ -451,14 +369,12 @@ def get_authenticated_session(username, password, chat_id=None):
         with auth_sessions_lock:
             user_auth_sessions.pop(email_lower, None)
 
-    # تسجيل دخول جديد
     sess = requests.Session()
     if email_lower in EXEMPT_ACCOUNTS:
         fast_proxy_url = get_fastest_proxy_exempt(email_lower)
         if fast_proxy_url:
             sess.proxies = {"http": fast_proxy_url, "https": fast_proxy_url}
         else:
-            # تم تعديل هذا الجزء: الدخول المباشر بدون بروكسي إذا كانت البروكسيات معطلة
             print(f"[SESSION] ⚠️ {email_lower}: البروكسيات ميتة! جاري الدخول المباشر بدون بروكسي...")
             if chat_id:
                 threading.Thread(target=notify_user_no_proxy, args=(chat_id, username), daemon=True).start()
@@ -665,16 +581,9 @@ def get_site_data(username, password, chat_id):
 
 def take_task_via_post(session, task_page_url):
     try:
-        order_id_for_verify = None
-        id_match = re.search(r"/order[_/](\d+)", task_page_url)
-        if not id_match:
-            id_match = re.search(r"/(\d+)/?(?:\?|$)", task_page_url)
-        if id_match:
-            order_id_for_verify = id_match.group(1)
-
         response = session.get(task_page_url, headers=HEADERS, timeout=10)
         if response.status_code != 200:
-            return False
+            return "FAILED"
 
         soup = BeautifulSoup(response.text, "html.parser")
         page_text = soup.get_text()
@@ -683,11 +592,11 @@ def take_task_via_post(session, task_page_url):
                          "order not found", "not found", "404"]
         for sig in not_available:
             if sig in page_text.lower():
-                return False
+                return "FAILED"
 
         form = soup.find("form", action=re.compile(r"batch|order_request"))
         if not form:
-            return False
+            return "FAILED"
 
         post_action_url = f"{BASE_URL}/order_request_socio/batch"
         if form.get('action'):
@@ -706,27 +615,26 @@ def take_task_via_post(session, task_page_url):
         elif form.find("input", name="ids[]"):
             post_data["ids[]"] = [form.find("input", name="ids[]").get("value", "")]
         else:
-            return False
+            return "FAILED"
 
         res = session.post(post_action_url, data=post_data, headers=HEADERS, timeout=10)
         if res.status_code != 200:
-            return False
+            return "FAILED"
 
-        time.sleep(1.5)
-        confirmed_r = session.get(CONFIRMED_URL, headers=HEADERS, timeout=10)
-        if confirmed_r.status_code == 200:
-            confirmed_soup = BeautifulSoup(confirmed_r.text, "html.parser")
-            table = confirmed_soup.find("table", id="publisher-requests")
-            if table:
-                rows = table.find_all("tr")
-                if rows and len(rows) > 1:
-                    if order_id_for_verify:
-                        return order_id_for_verify in confirmed_r.text
-                    data_rows = [r for r in rows if r.find_all("td")]
-                    return len(data_rows) > 0
-        return False
+        response_text = res.text
+
+        if "задание уже выполняется" in response_text:
+            return "SAME_IP"
+
+        if "Аккаунты не выбраны" in response_text:
+            return "ALREADY_TAKEN"
+
+        if "взяли задание в работу" in response_text:
+            return "SUCCESS"
+
+        return "FAILED"
     except Exception:
-        return False
+        return "FAILED"
 
 # ==========================================
 # 🔥 الواجهات
@@ -815,6 +723,46 @@ def get_take_work_menu(chat_id):
 _bg_last_hunt = {}
 _bg_last_take = {}
 
+_same_ip_blocked_tasks = {}
+_same_ip_blocked_lock  = threading.Lock()
+SAME_IP_BLOCK_EXPIRY   = 12 * 3600  
+
+
+def _is_task_blocked(email_lower, task_id):
+    now = time.time()
+    with _same_ip_blocked_lock:
+        acc_map = _same_ip_blocked_tasks.get(email_lower)
+        if not acc_map:
+            return False
+
+        expired = [tid for tid, added_at in acc_map.items()
+                   if now - added_at >= SAME_IP_BLOCK_EXPIRY]
+        for tid in expired:
+            acc_map.pop(tid, None)
+        if not acc_map:
+            _same_ip_blocked_tasks.pop(email_lower, None)
+            return False
+
+        return task_id in acc_map
+
+
+def _add_blocked_task(email_lower, task_id):
+    with _same_ip_blocked_lock:
+        _same_ip_blocked_tasks.setdefault(email_lower, {})[task_id] = time.time()
+
+
+def _extract_task_id(task_page_url):
+    m = re.search(r"/create-request/(\d+)", task_page_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"/order[_/](\d+)", task_page_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"/(\d+)/?(?:\?|$)", task_page_url)
+    if m:
+        return m.group(1)
+    return task_page_url  
+
 def _bg_process_one_account_inner(chat_id, email, password, current_time):
     key = (chat_id, email)
     e = email.lower().strip()
@@ -823,20 +771,43 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
     if settings['auto_hunt_status']:
         last_take = _bg_last_take.get(key, 0)
         if current_time - last_take >= TAKE_COOLDOWN:
-            if current_time - _bg_last_hunt.get(key, 0) >= 120:
+            if current_time - _bg_last_hunt.get(key, 0) >= 80:
                 _bg_last_hunt[key] = current_time
                 data, status = get_site_data(email, password, chat_id)
                 if status == "SUCCESS" and data and data['tasks']:
                     mode = settings['hunt_mode']
                     for target_task in data['tasks']:
+                        task_id = _extract_task_id(target_task['task_page'])
+                        if _is_task_blocked(e, task_id):
+                            continue  
+
                         task_minutes = target_task.get('minutes', 120)
                         should_take = ((mode == "GT"  and task_minutes > 120) or
                                        (mode == "GTE" and task_minutes >= 120))
                         if should_take:
                             session = get_authenticated_session(email, password, chat_id)
                             if session:
-                                success = take_task_via_post(session, target_task['task_page'])
-                                if success:
+                                # تحديث البروكسي لحظياً بالتوازي فوراً عند استلام المهمة لضمان السرعة القصوى وعدم هروبها
+                                if e in EXEMPT_ACCOUNTS:
+                                    fast_proxy_url = get_fastest_proxy_exempt(e)
+                                    if fast_proxy_url:
+                                        session.proxies = {"http": fast_proxy_url, "https": fast_proxy_url}
+
+                                if not _session_has_proxy_attached(session, email):
+                                    try:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"🚫 **تنبيه: تعذّر الاصطحاب**\n\n"
+                                            f"👤 الحساب: {e.split('@')[0]}\n"
+                                            f"🛑 لا يوجد اتصال ناجح بأي بروكسي حالياً، ولن يتم الاصطحاب بالـ IP الأصلي إطلاقاً.\n"
+                                            f"🔁 سيُعاد المحاولة تلقائياً عند توفر بروكسي شغّال."
+                                        )
+                                    except Exception:
+                                        pass
+                                    break
+
+                                take_status = take_task_via_post(session, target_task['task_page'])
+                                if take_status == "SUCCESS":
                                     _bg_last_take[key] = time.time()
                                     try:
                                         bot.send_message(
@@ -845,6 +816,32 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                                             f"👤 الحساب: {e.split('@')[0]}\n"
                                             f"💰 السعر: {target_task['price']} RUB\n"
                                             f"⏱️ الوقت: {target_task['duration']}"
+                                        )
+                                    except Exception:
+                                        pass
+                                elif take_status == "SAME_IP":
+                                    _add_blocked_task(e, task_id)
+                                    try:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"⚠️ **تنبيه: نفس عنوان IP**\n\n"
+                                            f"👤 الحساب: {e.split('@')[0]}\n"
+                                            f"🆔 رقم المهمة: {task_id}\n"
+                                            f"🛑 الموقع رفض الاصطحاب لأن نفس الـ IP يستخدمه حساب آخر لديك في مهمة قيد التنفيذ حالياً.\n"
+                                            f"🚫 لن يُعاد تجربة هذه المهمة من هذا الحساب لمدة 12 ساعة."
+                                        )
+                                    except Exception:
+                                        pass
+                                elif take_status == "ALREADY_TAKEN":
+                                    _add_blocked_task(e, task_id)
+                                    try:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"⚠️ **تنبيه: هذه المهمة نُفّذت من قبل**\n\n"
+                                            f"👤 الحساب: {e.split('@')[0]}\n"
+                                            f"🆔 رقم المهمة: {task_id}\n"
+                                            f"🛑 الموقع لم يعرض أي حساب للاختيار، لأن هذا الحساب سبق ونفّذ هذه المهمة تحديداً من قبل.\n"
+                                            f"🚫 لن يُعاد تجربة هذه المهمة من هذا الحساب لمدة 12 ساعة."
                                         )
                                     except Exception:
                                         pass
@@ -1089,7 +1086,7 @@ def _handle_callback_inner(call):
         bot.answer_callback_query(call.id)
         current_active = auto_hunt_status.get(chat_id, False)
         current_mode   = hunt_mode.get(chat_id, "")
-        
+
         if current_active and current_mode == "GT":
             auto_hunt_status[chat_id] = False
             status_msg = "🔴 تم إيقاف تصيد (أكبر من ساعتين) لجميع الحسابات المحفوظة"
@@ -1097,12 +1094,11 @@ def _handle_callback_inner(call):
             auto_hunt_status[chat_id] = True
             hunt_mode[chat_id] = "GT"
             status_msg = "✅ تم تفعيل تصيد (أكبر من ساعتين) لجميع الحسابات المحفوظة"
-            
-        # تطبيق التعديلات على جميع الحسابات الخاصة بالمستخدم (chat_id)
+
         saved_accounts = get_saved_multi_accounts(chat_id)
         for acc in saved_accounts:
             sync_chat_settings_to_email(chat_id, acc['email'])
-            
+
         try:
             bot.edit_message_text(
                 f"⚡ **اصطحاب العمل**\n{status_msg}\nــــــــــــــــــ",
@@ -1117,7 +1113,7 @@ def _handle_callback_inner(call):
         bot.answer_callback_query(call.id)
         current_active = auto_hunt_status.get(chat_id, False)
         current_mode   = hunt_mode.get(chat_id, "")
-        
+
         if current_active and current_mode == "GTE":
             auto_hunt_status[chat_id] = False
             status_msg = "🔴 تم إيقاف تصيد (ساعتين فما فوق) لجميع الحسابات المحفوظة"
@@ -1125,12 +1121,11 @@ def _handle_callback_inner(call):
             auto_hunt_status[chat_id] = True
             hunt_mode[chat_id] = "GTE"
             status_msg = "✅ تم تفعيل تصيد (ساعتين فما فوق) لجميع الحسابات المحفوظة"
-            
-        # تطبيق التعديلات على جميع الحسابات الخاصة بالمستخدم (chat_id)
+
         saved_accounts = get_saved_multi_accounts(chat_id)
         for acc in saved_accounts:
             sync_chat_settings_to_email(chat_id, acc['email'])
-            
+
         try:
             bot.edit_message_text(
                 f"⚡ **اصطحاب العمل**\n{status_msg}\nــــــــــــــــــ",
@@ -1300,7 +1295,7 @@ def _handle_message_inner(message):
             except Exception:
                 pass
         user_sessions[chat_id] = {'step': 'WAITING_PASSWORD', 'email': text}
-        msg = msg = bot.send_message(chat_id, "🔐 أدخل كلمة المرور:")
+        msg = bot.send_message(chat_id, "🔐 أدخل كلمة المرور:")
         user_transient_messages[chat_id] = msg.message_id
 
 # ==========================================
