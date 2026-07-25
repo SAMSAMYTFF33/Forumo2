@@ -76,8 +76,9 @@ PROXYSCRAPE_API_KEY = os.environ.get("PROXYSCRAPE_API_KEY", "JZ3pweHyZZ9jQm8Unre
 
 PROXYSCRAPE_BASE          = "https://api.proxyscrape.com"
 PROXY_TEST_URL            = "https://api.ipify.org?format=json"
-PROXY_TEST_TIMEOUT        = 6
+PROXY_TEST_TIMEOUT        = 4       # مهلة قصيرة لكل بروكسي عشان الفحص يخلص بسرعة
 PROXY_TEST_WORKERS        = 20
+PROXY_BATCH_SIZE          = 8       # عدد البروكسيات المفحوصة بالتوازي في كل محاولة
 PROXY_ASSIGNMENTS_FILE    = "account_proxies.json"
 
 proxy_lock          = threading.Lock()
@@ -212,40 +213,46 @@ def _test_proxy(proxy_str):
         return proxy_str, False
 
 
-def _test_many(proxies):
-    alive = []
+def _test_batch_parallel(proxies):
+    """يفحص مجموعة بروكسيات بالتوازي بسرعة، ويرجع أول واحد شغال من غير
+    ما ينتظر باقي الدفعة (بيلغي الباقي فورًا بمجرد ما يلاقي واحد شغال)."""
     if not proxies:
-        return alive
-    with concurrent.futures.ThreadPoolExecutor(max_workers=PROXY_TEST_WORKERS) as ex:
-        futures = [ex.submit(_test_proxy, p) for p in proxies]
+        return None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(proxies)) as ex:
+        futures = {ex.submit(_test_proxy, p): p for p in proxies}
         for fut in concurrent.futures.as_completed(futures):
-            proxy_str, ok = fut.result()
+            try:
+                proxy_str, ok = fut.result()
+            except Exception:
+                continue
             if ok:
-                alive.append(proxy_str)
-    return alive
+                for f in futures:
+                    f.cancel()
+                return proxy_str
+    return None
 
 
 def _target_proxy_count():
-    """عدد البروكسيات المطلوب = عدد الحسابات المحفوظة على البوت (مش أكتر).
-    لو مسجل 3 حسابات مثلاً، فبمجرد ما نلاقي 3 بروكسيات شغالة نوقف الفحص."""
+    """عدد البروكسيات المطلوب توفيرها بالمخزون = أكبر قيمة بين عدد
+    الحسابات المحفوظة وحجم دفعة الفحص المتوازي، عشان نضمن دايمًا فيه
+    دفعة كافية نفحصها بسرعة وقت الحاجة."""
     emails = set()
     for accs in local_multi_accounts.values():
         for acc in accs:
             emails.add(acc['email'].lower().strip())
-    return max(len(emails), 1)
+    return max(len(emails), PROXY_BATCH_SIZE, 1)
 
 
 def refresh_proxy_pool():
-    """يجيب بروكسيات جديدة ويختبرها، ويوقف الفحص فوراً بمجرد ما يوصل عدد
-    البروكسيات الشغّالة (المعيّنة + المتاحة في المخزون) لعدد الحسابات —
-    مفيش داعي نفحص أكتر من كده."""
+    """يجيب بروكسيات جديدة ويختبرها بالتوازي، ويوقف الفحص فوراً بمجرد ما
+    يوصل عدد البروكسيات الشغّالة (المعيّنة + المتاحة في المخزون) للهدف."""
     global working_proxy_pool
 
     target = _target_proxy_count()
     with proxy_lock:
         have = len(working_proxy_pool) + len(assigned_proxies)
     if have >= target:
-        print(f"[PROXY] عدد البروكسيات الشغالة ({have}) يكفي عدد الحسابات ({target}) — تخطي الفحص.")
+        print(f"[PROXY] عدد البروكسيات الشغالة ({have}) يكفي الهدف ({target}) — تخطي الفحص.")
         return
 
     candidates = _fetch_free_proxies(limit=max(target * 10, 50))
@@ -282,88 +289,77 @@ def refresh_proxy_pool():
           f"المتاح الآن: {len(working_proxy_pool)} (الهدف: {target})")
 
 
-def ensure_account_proxy(email, chat_id=None):
-    """
-    بتاخد بروكسي فريد 100% من المخزون (مبيتشاركش مع أي حساب تاني إطلاقاً)،
-    بتحدد بلد الـ IP بتاعه، وبتحفظه كبروكسي دائم لهذا الحساب. لو أصلاً
-    معيّن، بترجّع نفس المعلومات من غير ما تاخد بروكسي جديد.
-
-    مبتتنادوش إلا لحظة وجود مهمة فعلاً ونحاول نصطحبها — مفيش أي تجهيز
-    استباقي وقت إضافة الحساب. كمان مفيش أي رسائل تليجرام هنا (صامتة
-    تمامًا)، بس لوج في الكونسول للمتابعة.
-    """
-    email_lower = email.lower().strip()
-
-    with proxy_lock:
-        existing = assigned_proxies.get(email_lower)
-    if existing:
-        return existing
-
-    with proxy_lock:
-        need_refill = (len(working_proxy_pool) + len(assigned_proxies)) < _target_proxy_count()
-    if need_refill:
-        refresh_proxy_pool()
-
-    with proxy_lock:
-        # ضمان عدم المشاركة إطلاقاً: نسحب بروكسي من المخزون فقط (مش مستخدم
-        # عند أي حساب تاني أصلاً)، ونشيله من المخزون فور تعيينه.
-        if not working_proxy_pool:
-            new_proxy = None
-        else:
-            new_proxy = working_proxy_pool.pop(0)
-
-    if not new_proxy:
-        print(f"[PROXY] لا يوجد بروكسي متاح حالياً لتجهيزه للحساب {email_lower}")
-        return None
-
-    ip      = _proxy_ip(new_proxy)
-    country = _lookup_ip_country(ip)
-    info = {"proxy": new_proxy, "ip": ip, "country": country}
-
-    with proxy_lock:
-        assigned_proxies[email_lower] = info
-        _save_proxy_assignments()
-
-    print(f"[PROXY] تم تجهيز بروكسي للحساب {email_lower}: {ip} ({country})")
-    return info
-
-
 def get_account_proxy_info(email):
     """بيرجع {proxy, ip, country} للحساب لو معيّن له بروكسي، وإلا None.
-    للعرض بس — مبيعملش أي تعيين جديد."""
+    للعرض بس — مبيعملش أي تعيين أو فحص جديد."""
     with proxy_lock:
         return assigned_proxies.get(email.lower().strip())
 
 
-def get_proxy_for_account(email, chat_id=None, force_new=False):
+def get_working_proxy_for_account(email, chat_id=None):
     """
-    يرجّع proxy URL جاهز (يبدأ بـ http://) لاستخدامه مع requests — من غير
-    أي فحص استباقي (بينغ لـ ipify) عشان نوفّر موارد الاستضافة المجانية،
-    ومن غير أي رسائل تليجرام مزعجة (صامت تمامًا، بس لوج كونسول).
+    بترجع proxy URL شغال فعليًا الآن، للاستخدام في عرض المهام أو
+    الاصطحاب فقط — تسجيل الدخول دايمًا اتصال عادي من غير بروكسي.
 
-    الفلسفة: "شغل ذكي مش شغل مجهود":
-      - البروكسي بيتجهّز فقط لحظة وجود مهمة فعلاً ومحاولة اصطحابها —
-        مفيش أي اعتماد أو تجهيز بروكسي قبل كده إطلاقاً.
-      - كل حساب بياخد بروكسي فريد ودائم، ومبيتشاركش مع أي حساب تاني.
-      - لو البروكسي فشل فعلاً وقت الاصطحاب، الكود المستدعي بينادي هنا
-        بـ force_new=True فيتغيّر البروكسي بصمت.
+    الآلية (سريعة ومتوازية، وبدون أي رسائل تليجرام مزعجة):
+      1) لو الحساب معاه بروكسي معيّن من قبل، بيتفحص لوحده بسرعة — لو
+         شغال يترجع فورًا (أسرع مسار، فحص واحد بس).
+      2) لو مات أو مفيش، بيتفحص دفعة بروكسيات ({PROXY_BATCH_SIZE}) بالتوازي
+         في نفس اللحظة، وبيترجع أول واحد شغال منها فورًا (من غير ما
+         ينتظر الباقي)، وبيتحفظ كبروكسي الحساب الجديد.
+      3) البروكسي مش بيفضل مرتبط بالحساب لو مات — بيتغيّر لبديل شغال
+         حالاً، وممكن يجرب دفعة تانية لو الأولى كلها ميتة.
     """
     email_lower = email.lower().strip()
-
-    if force_new:
-        with proxy_lock:
-            assigned_proxies.pop(email_lower, None)
-        print(f"[PROXY] البروكسي القديم لحساب {email_lower} فشل — جاري تعيين بديل بصمت.")
-        info = ensure_account_proxy(email_lower, chat_id=chat_id)
-        return _build_proxy_url(info["proxy"]) if info else None
 
     with proxy_lock:
         current = assigned_proxies.get(email_lower)
     if current:
-        return _build_proxy_url(current["proxy"])
+        _, ok = _test_proxy(current["proxy"])
+        if ok:
+            return _build_proxy_url(current["proxy"])
+        # البروكسي القديم مات — منفضلش مرتبطين بيه، نشيله ونلاقي بديل فورًا
+        with proxy_lock:
+            assigned_proxies.pop(email_lower, None)
 
-    info = ensure_account_proxy(email_lower, chat_id=chat_id)
-    return _build_proxy_url(info["proxy"]) if info else None
+    with proxy_lock:
+        need_refill = len(working_proxy_pool) < PROXY_BATCH_SIZE
+    if need_refill:
+        refresh_proxy_pool()
+
+    for _round in range(2):  # جولتين فحص بالتوازي بحد أقصى قبل الاستسلام
+        with proxy_lock:
+            batch = list(working_proxy_pool[:PROXY_BATCH_SIZE])
+        if not batch:
+            refresh_proxy_pool()
+            with proxy_lock:
+                batch = list(working_proxy_pool[:PROXY_BATCH_SIZE])
+            if not batch:
+                break
+
+        working = _test_batch_parallel(batch)
+        if working:
+            with proxy_lock:
+                if working in working_proxy_pool:
+                    working_proxy_pool.remove(working)
+            ip      = _proxy_ip(working)
+            country = _lookup_ip_country(ip)
+            info = {"proxy": working, "ip": ip, "country": country}
+            with proxy_lock:
+                assigned_proxies[email_lower] = info
+                _save_proxy_assignments()
+            print(f"[PROXY] {email_lower} ← بروكسي شغال: {ip} ({country})")
+            return _build_proxy_url(working)
+
+        # الدفعة دي كلها ميتة — نشيلها من المخزون ونجرب دفعة جديدة
+        with proxy_lock:
+            for p in batch:
+                if p in working_proxy_pool:
+                    working_proxy_pool.remove(p)
+        refresh_proxy_pool()
+
+    print(f"[PROXY] لم يتم العثور على أي بروكسي شغال لحساب {email_lower} حاليًا.")
+    return None
 
 
 def _init_proxy_system():
@@ -585,6 +581,9 @@ def get_authenticated_session(username, password, chat_id=None):
         cached = user_auth_sessions.get(email_lower)
     if cached:
         try:
+            # 🔒 تسجيل الدخول / التحقق من الجلسة دايمًا اتصال عادي —
+            # حتى لو الجلسة كانت لسه شايلة بروكسي من آخر عرض/اصطحاب مهمة.
+            cached.proxies = {}
             test_r = cached.get(BASE_URL, headers=HEADERS, timeout=8)
             page_state = detect_page_state(test_r.text)
             if page_state == "blocked":
@@ -685,8 +684,27 @@ def get_site_data(username, password, chat_id):
     session = get_authenticated_session(username, password, chat_id)
     if not session:
         return None, "AUTH_FAILED"
+    email_lower = username.lower().strip()
+
+    # 🌐 عرض/جلب المهام بيتطلب بروكسي شغال (تسجيل الدخول بس هو اللي فيه استثناء)
+    proxy_url = get_working_proxy_for_account(email_lower, chat_id=chat_id)
+    if proxy_url:
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+    else:
+        return None, "NO_PROXY"
+
     try:
-        r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
+        try:
+            r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
+        except Exception as e:
+            if _is_proxy_error(e):
+                retry_proxy = get_working_proxy_for_account(email_lower, chat_id=chat_id)
+                if not retry_proxy:
+                    return None, "NO_PROXY"
+                session.proxies = {"http": retry_proxy, "https": retry_proxy}
+                r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
+            else:
+                raise
         page_state = detect_page_state(r.text)
         if page_state == "blocked":
             threading.Thread(target=handle_blocked_account,
@@ -815,7 +833,7 @@ def take_task_via_post(session, task_page_url, email=None, chat_id=None):
             response = session.get(task_page_url, headers=HEADERS, timeout=10)
         except Exception as e:
             if email and _is_proxy_error(e):
-                retry_proxy = get_proxy_for_account(email, chat_id=chat_id, force_new=True)
+                retry_proxy = get_working_proxy_for_account(email, chat_id=chat_id)
                 if not retry_proxy:
                     return "FAILED"
                 session.proxies = {"http": retry_proxy, "https": retry_proxy}
@@ -1078,8 +1096,8 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                         if should_take:
                             session = get_authenticated_session(email, password, chat_id)
                             if session:
-                                # تأكيد إن البروكسي الخاص بالحساب لسه مرتبط بالجلسة قبل الاصطحاب
-                                proxy_url = get_proxy_for_account(e, chat_id=chat_id)
+                                # بروكسي شغال فعليًا (فحص متوازي سريع) قبل الاصطحاب
+                                proxy_url = get_working_proxy_for_account(e, chat_id=chat_id)
                                 if proxy_url:
                                     session.proxies = {"http": proxy_url, "https": proxy_url}
 
@@ -1138,8 +1156,8 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                                         )
                                     except Exception:
                                         pass
-                                # ↩️ رجّع الجلسة لاتصال عادي بعد محاولة الاصطحاب —
-                                # البروكسي بيتفعّل بس لحظة الاصطحاب نفسها.
+                                # ↩️ رجّع الجلسة لاتصال عادي بعد الاصطحاب — تسجيل
+                                # الدخول لازم يفضل دايمًا من غير بروكسي.
                                 session.proxies = {}
                             break
 
