@@ -76,9 +76,9 @@ PROXYSCRAPE_API_KEY = os.environ.get("PROXYSCRAPE_API_KEY", "JZ3pweHyZZ9jQm8Unre
 
 PROXYSCRAPE_BASE          = "https://api.proxyscrape.com"
 PROXY_TEST_URL            = "https://api.ipify.org?format=json"
-PROXY_TEST_TIMEOUT        = 4       # مهلة قصيرة لكل بروكسي عشان الفحص يخلص بسرعة
-PROXY_TEST_WORKERS        = 20
-PROXY_BATCH_SIZE          = 8       # عدد البروكسيات المفحوصة بالتوازي في كل محاولة
+PROXY_TEST_TIMEOUT        = 2.5     # مهلة أقصر لكل بروكسي — فشل سريع بدل الانتظار
+PROXY_TEST_WORKERS        = 30       # فحص أكبر بالتوازي وقت تجديد المخزون
+PROXY_BATCH_SIZE          = 15       # دفعة أكبر بتتفحص مرة واحدة → احتمال أعلى نلاقي شغال بسرعة
 PROXY_ASSIGNMENTS_FILE    = "account_proxies.json"
 
 proxy_lock          = threading.Lock()
@@ -255,9 +255,13 @@ def refresh_proxy_pool():
         print(f"[PROXY] عدد البروكسيات الشغالة ({have}) يكفي الهدف ({target}) — تخطي الفحص.")
         return
 
-    candidates = _fetch_free_proxies(limit=max(target * 10, 50))
-    if PROXYSCRAPE_API_KEY:
-        candidates += _fetch_account_proxies()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as fetch_ex:
+        free_future = fetch_ex.submit(_fetch_free_proxies, limit=max(target * 6, 40))
+        account_future = (fetch_ex.submit(_fetch_account_proxies)
+                          if PROXYSCRAPE_API_KEY else None)
+        candidates = free_future.result()
+        if account_future:
+            candidates += account_future.result()
     candidates = list(dict.fromkeys(candidates))
     if not candidates:
         print("[PROXY] لا توجد بروكسيات جديدة لجلبها الآن.")
@@ -684,27 +688,11 @@ def get_site_data(username, password, chat_id):
     session = get_authenticated_session(username, password, chat_id)
     if not session:
         return None, "AUTH_FAILED"
-    email_lower = username.lower().strip()
 
-    # 🌐 عرض/جلب المهام بيتطلب بروكسي شغال (تسجيل الدخول بس هو اللي فيه استثناء)
-    proxy_url = get_working_proxy_for_account(email_lower, chat_id=chat_id)
-    if proxy_url:
-        session.proxies = {"http": proxy_url, "https": proxy_url}
-    else:
-        return None, "NO_PROXY"
-
+    # 🌐 جلب/عرض المهام اتصال عادي من غير بروكسي — البروكسي بيتفعّل بس
+    # لحظة الاصطحاب الفعلي (شوف take_task_via_post وموقع استدعائها).
     try:
-        try:
-            r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
-        except Exception as e:
-            if _is_proxy_error(e):
-                retry_proxy = get_working_proxy_for_account(email_lower, chat_id=chat_id)
-                if not retry_proxy:
-                    return None, "NO_PROXY"
-                session.proxies = {"http": retry_proxy, "https": retry_proxy}
-                r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
-            else:
-                raise
+        r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
         page_state = detect_page_state(r.text)
         if page_state == "blocked":
             threading.Thread(target=handle_blocked_account,
