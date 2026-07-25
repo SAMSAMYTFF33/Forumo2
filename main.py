@@ -59,7 +59,7 @@ HEADERS = {
     "Referer": BASE_URL
 }
 
-TAKE_COOLDOWN = 60
+TAKE_COOLDOWN = 30
 
 # ==========================================
 # 🌐 نظام البروكسيات الديناميكي (ProxyScrape)
@@ -70,7 +70,7 @@ TAKE_COOLDOWN = 60
 # ==========================================
 
 # ⚠️ حط المفتاح كـ environment variable، متسيبوش مكتوب هنا في الكود:
-#     export PROXYSCRAPE_API_KEY="JZ3pweHyZZ9jQm8UnreSczl8vQxwf5tFE7k4aHyd0b6dSm3nSYO6cmgDrh0HqSTR"
+#     export PROXYSCRAPE_API_KEY="مفتاحك"
 # (بما إن المفتاح ظهر قبل كده في المحادثة، يُفضّل تعمل Regenerate له من لوحة ProxyScrape)
 PROXYSCRAPE_API_KEY = os.environ.get("PROXYSCRAPE_API_KEY", "JZ3pweHyZZ9jQm8UnreSczl8vQxwf5tFE7k4aHyd0b6dSm3nSYO6cmgDrh0HqSTR")
 
@@ -90,7 +90,19 @@ def _load_proxy_assignments():
     try:
         if os.path.exists(PROXY_ASSIGNMENTS_FILE):
             with open(PROXY_ASSIGNMENTS_FILE, "r", encoding="utf-8") as f:
-                assigned_proxies = json.load(f)
+                loaded = json.load(f)
+            # توافق مع نسخة قديمة كانت بتخزن السطر كـ نص بسيط بدل dict
+            migrated = {}
+            for email_lower, value in loaded.items():
+                if isinstance(value, dict) and "proxy" in value:
+                    migrated[email_lower] = value
+                elif isinstance(value, str):
+                    migrated[email_lower] = {
+                        "proxy": value,
+                        "ip": value.split(":")[0],
+                        "country": "غير معروف",
+                    }
+            assigned_proxies = migrated
     except Exception as e:
         print(f"[PROXY] فشل تحميل ملف التعيينات: {e}")
         assigned_proxies = {}
@@ -169,6 +181,26 @@ def _build_proxy_url(proxy_str):
     return f"http://{proxy_str}"
 
 
+def _proxy_ip(proxy_str):
+    return proxy_str.split(":")[0]
+
+
+def _lookup_ip_country(ip):
+    """بحث سريع عن بلد الـ IP (بدون مفتاح). بيرجع 'غير معروف' لو الطلب فشل."""
+    try:
+        r = requests.get(
+            f"http://ip-api.com/json/{ip}",
+            params={"fields": "status,country"},
+            timeout=5,
+        )
+        data = r.json()
+        if data.get("status") == "success" and data.get("country"):
+            return data["country"]
+    except Exception:
+        pass
+    return "غير معروف"
+
+
 def _test_proxy(proxy_str):
     proxy_url = _build_proxy_url(proxy_str)
     try:
@@ -234,7 +266,7 @@ def refresh_proxy_pool():
                 continue
             if ok:
                 with proxy_lock:
-                    used     = set(assigned_proxies.values())
+                    used     = {info["proxy"] for info in assigned_proxies.values()}
                     pool_set = set(working_proxy_pool)
                     if proxy_str not in used and proxy_str not in pool_set:
                         working_proxy_pool.append(proxy_str)
@@ -250,17 +282,87 @@ def refresh_proxy_pool():
           f"المتاح الآن: {len(working_proxy_pool)} (الهدف: {target})")
 
 
+def ensure_account_proxy(email, chat_id=None):
+    """
+    بتتنادى مرة واحدة عند إضافة الحساب (مش وقت الاصطحاب). بتاخد بروكسي
+    فريد 100% من المخزون (مبيتشاركش مع أي حساب تاني إطلاقاً)، بتحدد بلد
+    الـ IP بتاعه، وبتحفظه كبروكسي دائم لهذا الحساب. لو أصلاً معيّن، بترجّع
+    نفس المعلومات من غير ما تاخد بروكسي جديد.
+    """
+    email_lower = email.lower().strip()
+
+    with proxy_lock:
+        existing = assigned_proxies.get(email_lower)
+    if existing:
+        return existing
+
+    with proxy_lock:
+        need_refill = (len(working_proxy_pool) + len(assigned_proxies)) < _target_proxy_count()
+    if need_refill:
+        refresh_proxy_pool()
+
+    with proxy_lock:
+        # ضمان عدم المشاركة إطلاقاً: نسحب بروكسي من المخزون فقط (مش مستخدم
+        # عند أي حساب تاني أصلاً)، ونشيله من المخزون فور تعيينه.
+        if not working_proxy_pool:
+            new_proxy = None
+        else:
+            new_proxy = working_proxy_pool.pop(0)
+
+    if not new_proxy:
+        if chat_id:
+            try:
+                bot.send_message(
+                    chat_id,
+                    f"🚫 **لا يوجد بروكسي متاح حالياً**\n\n"
+                    f"👤 الحساب: {email_lower.split('@')[0]}\n"
+                    f"🛑 لم يُعثر على بروكسي شغّال لتجهيزه لهذا الحساب. سيُعاد المحاولة تلقائياً."
+                )
+            except Exception:
+                pass
+        return None
+
+    ip      = _proxy_ip(new_proxy)
+    country = _lookup_ip_country(ip)
+    info = {"proxy": new_proxy, "ip": ip, "country": country}
+
+    with proxy_lock:
+        assigned_proxies[email_lower] = info
+        _save_proxy_assignments()
+
+    if chat_id:
+        try:
+            bot.send_message(
+                chat_id,
+                f"🌐 **تم تجهيز بروكسي للحساب**\n\n"
+                f"👤 {email_lower}\n"
+                f"IP: `{ip}`\n"
+                f"Country: {country}"
+            )
+        except Exception:
+            pass
+
+    return info
+
+
+def get_account_proxy_info(email):
+    """بيرجع {proxy, ip, country} للحساب لو معيّن له بروكسي، وإلا None.
+    للعرض بس — مبيعملش أي تعيين جديد."""
+    with proxy_lock:
+        return assigned_proxies.get(email.lower().strip())
+
+
 def get_proxy_for_account(email, chat_id=None, force_new=False):
     """
     يرجّع proxy URL جاهز (يبدأ بـ http://) لاستخدامه مع requests — من غير
     أي فحص استباقي (بينغ لـ ipify) عشان نوفّر موارد الاستضافة المجانية.
 
     الفلسفة: "شغل ذكي مش شغل مجهود":
-      - أول مرة للحساب: ياخد بروكسي من المخزون ويتثبّت عليه (بروكسي دائم).
-      - الاستخدام الفعلي (تسجيل الدخول / سحب مهمة) هو نفسه الفحص. لو فشل
-        فعلاً بسبب البروكسي وقت الاستخدام، الكود المستدعي بينادي هنا بـ
-        force_new=True فيتغيّر البروكسي — وده بيحصل بس وقت الحاجة الحقيقية،
-        مش على تايمر بيشتغل باستمرار.
+      - كل حساب بياخد بروكسي فريد ودائم (عادةً من لحظة إضافة الحساب عبر
+        ensure_account_proxy)، ومبيتشاركش مع أي حساب تاني إطلاقاً.
+      - الاستخدام الفعلي (اصطحاب مهمة) هو نفسه الفحص. لو فشل فعلاً بسبب
+        البروكسي وقت الاستخدام، الكود المستدعي بينادي هنا بـ force_new=True
+        فيتغيّر البروكسي — وده بيحصل بس وقت الحاجة الحقيقية.
     """
     email_lower = email.lower().strip()
 
@@ -277,40 +379,16 @@ def get_proxy_for_account(email, chat_id=None, force_new=False):
                 )
             except Exception:
                 pass
-    else:
-        with proxy_lock:
-            current = assigned_proxies.get(email_lower)
-        if current:
-            return _build_proxy_url(current)
+        info = ensure_account_proxy(email_lower, chat_id=chat_id)
+        return _build_proxy_url(info["proxy"]) if info else None
 
     with proxy_lock:
-        need_refill = (len(working_proxy_pool) + len(assigned_proxies)) < _target_proxy_count()
-    if need_refill:
-        refresh_proxy_pool()
+        current = assigned_proxies.get(email_lower)
+    if current:
+        return _build_proxy_url(current["proxy"])
 
-    with proxy_lock:
-        if working_proxy_pool:
-            new_proxy = working_proxy_pool.pop(0)
-            assigned_proxies[email_lower] = new_proxy
-            _save_proxy_assignments()
-            proxy_to_use = new_proxy
-        else:
-            proxy_to_use = None
-
-    if proxy_to_use:
-        return _build_proxy_url(proxy_to_use)
-
-    if chat_id:
-        try:
-            bot.send_message(
-                chat_id,
-                f"🚫 **لا يوجد بروكسي متاح حالياً**\n\n"
-                f"👤 الحساب: {email_lower.split('@')[0]}\n"
-                f"🛑 لم يُعثر على بروكسي شغّال في هذه اللحظة. سيُعاد المحاولة تلقائياً."
-            )
-        except Exception:
-            pass
-    return None
+    info = ensure_account_proxy(email_lower, chat_id=chat_id)
+    return _build_proxy_url(info["proxy"]) if info else None
 
 
 def _init_proxy_system():
@@ -841,8 +919,18 @@ def get_auth_menu(chat_id=None):
     ))
     return markup
 
-def get_main_menu_text() -> str:
-    return f"🏠 القائمة الرئيسية  {get_countdown_text()}\nــــــــــــــــــ"
+def get_main_menu_text(chat_id=None) -> str:
+    text = f"🏠 القائمة الرئيسية  {get_countdown_text()}\nــــــــــــــــــ"
+    if chat_id and chat_id in user_data_store:
+        email = user_data_store[chat_id].get('email', '')
+        if email:
+            info = get_account_proxy_info(email)
+            text += f"\n{email}"
+            if info:
+                text += f"\nIp: {info.get('ip', '?')}\nCountry: {info.get('country', 'غير معروف')}"
+            else:
+                text += "\n⏳ جاري تجهيز البروكسي..."
+    return text
 
 def get_main_menu(chat_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -910,6 +998,44 @@ def get_take_work_menu(chat_id):
 _bg_last_hunt = {}
 _bg_last_take = {}
 
+HUNT_INTERVAL_SECONDS = 80  # مهلة جلب المهام لكل حساب
+
+def recompute_hunt_stagger(chat_id):
+    """
+    توزّع بداية دورة الـ80 ثانية بالتساوي بين حسابات نفس الشات، ميكانيكيًا:
+    لو عندك N حساب، الفرق بين بداية كل حساب واللي بعده = 80/N ثانية،
+    مع بقاء كل حساب بيتفحص كل 80 ثانية بالظبط زي ما هو.
+    مثال (N=4): حساب1 فورًا، حساب2 بعد 20ث، حساب3 بعد 40ث، حساب4 بعد 60ث.
+    بتتنادى تلقائيًا كل ما يتضاف أو يتحذف حساب في الشات.
+    """
+    saved = get_saved_multi_accounts(chat_id)
+    n = len(saved)
+    if n == 0:
+        return
+    spacing = HUNT_INTERVAL_SECONDS / n
+    now = time.time()
+    for i, acc in enumerate(saved):
+        email_lower = acc['email']  # متخزن بالفعل lower-case في save_multi_account
+        key = (chat_id, email_lower)
+        offset = i * spacing
+        # أول فحص لهذا الحساب هيحصل تحديدًا بعد offset ثانية من دلوقتي
+        _bg_last_hunt[key] = now - (HUNT_INTERVAL_SECONDS - offset)
+
+
+def _wake_other_accounts(chat_id, current_email_lower):
+    """
+    لما حساب يكتشف مهمة موجودة فعلاً، الدالة دي بتخلي باقي حسابات نفس
+    الشات تحاول تصطحب فورًا (في أقرب دورة فحص خلال 5 ثواني بالأكتر)، من
+    غير ما تستنى الـ80 ثانية بتاعتها تكتمل.
+    """
+    with active_accounts_lock:
+        accounts = dict(active_accounts.get(chat_id, {}))
+    for email_key in accounts.keys():
+        if email_key == current_email_lower:
+            continue
+        _bg_last_hunt[(chat_id, email_key)] = 0
+
+
 _same_ip_blocked_tasks = {}
 _same_ip_blocked_lock  = threading.Lock()
 SAME_IP_BLOCK_EXPIRY   = 12 * 3600  
@@ -951,17 +1077,20 @@ def _extract_task_id(task_page_url):
     return task_page_url  
 
 def _bg_process_one_account_inner(chat_id, email, password, current_time):
-    key = (chat_id, email)
     e = email.lower().strip()
+    key = (chat_id, e)
     settings = get_email_settings(email)
 
     if settings['auto_hunt_status']:
         last_take = _bg_last_take.get(key, 0)
         if current_time - last_take >= TAKE_COOLDOWN:
-            if current_time - _bg_last_hunt.get(key, 0) >= 80:
+            if current_time - _bg_last_hunt.get(key, 0) >= HUNT_INTERVAL_SECONDS:
                 _bg_last_hunt[key] = current_time
                 data, status = get_site_data(email, password, chat_id)
                 if status == "SUCCESS" and data and data['tasks']:
+                    # 🔔 فيه مهمة موجودة فعلاً — نبّه باقي حسابات نفس الشات
+                    # يحاولوا يصطحبوا فورًا من غير انتظار دورتهم الطبيعية.
+                    _wake_other_accounts(chat_id, e)
                     mode = settings['hunt_mode']
                     for target_task in data['tasks']:
                         task_id = _extract_task_id(target_task['task_page'])
@@ -1106,11 +1235,11 @@ def _handle_callback_inner(call):
             bot.answer_callback_query(call.id)
             try:
                 bot.edit_message_text(
-                    get_main_menu_text(), chat_id, message_id,
+                    get_main_menu_text(chat_id), chat_id, message_id,
                     reply_markup=get_main_menu(chat_id)
                 )
             except Exception:
-                bot.send_message(chat_id, get_main_menu_text(),
+                bot.send_message(chat_id, get_main_menu_text(chat_id),
                                  reply_markup=get_main_menu(chat_id))
         else:
             bot.answer_callback_query(call.id, "⚠️ خطأ.", show_alert=True)
@@ -1200,7 +1329,7 @@ def _handle_callback_inner(call):
         bot.answer_callback_query(call.id)
         try:
             bot.edit_message_text(
-                get_main_menu_text(), chat_id, message_id,
+                get_main_menu_text(chat_id), chat_id, message_id,
                 reply_markup=get_main_menu(chat_id)
             )
         except Exception:
@@ -1356,7 +1485,7 @@ def _handle_message_inner(message):
         remove_kb = types.ReplyKeyboardRemove()
         if chat_id in user_data_store or get_saved_multi_accounts(chat_id):
             bot.send_message(chat_id, "مرحباً ⚙️", reply_markup=remove_kb)
-            bot.send_message(chat_id, get_main_menu_text(),
+            bot.send_message(chat_id, get_main_menu_text(chat_id),
                              reply_markup=get_main_menu(chat_id))
         else:
             bot.send_message(chat_id, "مرحباً.", reply_markup=remove_kb)
@@ -1402,11 +1531,19 @@ def _handle_message_inner(message):
                 save_multi_account(chat_id, email, password)
                 register_account_in_active(chat_id, email, password)
                 sync_chat_settings_to_email(chat_id, email)
+                recompute_hunt_stagger(chat_id)
                 with auth_sessions_lock:
                     user_auth_sessions[email_lower] = session
                 with logged_out_lock:
                     if chat_id in logged_out_accounts:
                         logged_out_accounts[chat_id].discard(email_lower)
+                # 🌐 جهّز بروكسي دائم وفريد لهذا الحساب فورًا (في الخلفية) —
+                # هيتحدد بلد الـ IP وييتبعت تنبيه لما يخلص.
+                threading.Thread(
+                    target=ensure_account_proxy,
+                    args=(email_lower,), kwargs={"chat_id": chat_id},
+                    daemon=True
+                ).start()
                 remove_kb = types.ReplyKeyboardRemove()
                 bot.send_message(chat_id, "✅", reply_markup=remove_kb)
                 bot.send_message(
@@ -1461,8 +1598,10 @@ def _handle_message_inner(message):
             with active_accounts_lock:
                 if chat_id in active_accounts:
                     active_accounts[chat_id].pop(email_del, None)
-            threading.Thread(target=delete_multi_account,
-                             args=(chat_id, email_del), daemon=True).start()
+            delete_multi_account(chat_id, email_del)
+            recompute_hunt_stagger(chat_id)
+            _bg_last_hunt.pop((chat_id, email_del), None)
+            _bg_last_take.pop((chat_id, email_del), None)
             with auth_sessions_lock:
                 user_auth_sessions.pop(email_del, None)
 
