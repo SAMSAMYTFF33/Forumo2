@@ -284,10 +284,13 @@ def refresh_proxy_pool():
 
 def ensure_account_proxy(email, chat_id=None):
     """
-    بتتنادى مرة واحدة عند إضافة الحساب (مش وقت الاصطحاب). بتاخد بروكسي
-    فريد 100% من المخزون (مبيتشاركش مع أي حساب تاني إطلاقاً)، بتحدد بلد
-    الـ IP بتاعه، وبتحفظه كبروكسي دائم لهذا الحساب. لو أصلاً معيّن، بترجّع
-    نفس المعلومات من غير ما تاخد بروكسي جديد.
+    بتاخد بروكسي فريد 100% من المخزون (مبيتشاركش مع أي حساب تاني إطلاقاً)،
+    بتحدد بلد الـ IP بتاعه، وبتحفظه كبروكسي دائم لهذا الحساب. لو أصلاً
+    معيّن، بترجّع نفس المعلومات من غير ما تاخد بروكسي جديد.
+
+    مبتتنادوش إلا لحظة وجود مهمة فعلاً ونحاول نصطحبها — مفيش أي تجهيز
+    استباقي وقت إضافة الحساب. كمان مفيش أي رسائل تليجرام هنا (صامتة
+    تمامًا)، بس لوج في الكونسول للمتابعة.
     """
     email_lower = email.lower().strip()
 
@@ -310,16 +313,7 @@ def ensure_account_proxy(email, chat_id=None):
             new_proxy = working_proxy_pool.pop(0)
 
     if not new_proxy:
-        if chat_id:
-            try:
-                bot.send_message(
-                    chat_id,
-                    f"🚫 **لا يوجد بروكسي متاح حالياً**\n\n"
-                    f"👤 الحساب: {email_lower.split('@')[0]}\n"
-                    f"🛑 لم يُعثر على بروكسي شغّال لتجهيزه لهذا الحساب. سيُعاد المحاولة تلقائياً."
-                )
-            except Exception:
-                pass
+        print(f"[PROXY] لا يوجد بروكسي متاح حالياً لتجهيزه للحساب {email_lower}")
         return None
 
     ip      = _proxy_ip(new_proxy)
@@ -330,18 +324,7 @@ def ensure_account_proxy(email, chat_id=None):
         assigned_proxies[email_lower] = info
         _save_proxy_assignments()
 
-    if chat_id:
-        try:
-            bot.send_message(
-                chat_id,
-                f"🌐 **تم تجهيز بروكسي للحساب**\n\n"
-                f"👤 {email_lower}\n"
-                f"IP: `{ip}`\n"
-                f"Country: {country}"
-            )
-        except Exception:
-            pass
-
+    print(f"[PROXY] تم تجهيز بروكسي للحساب {email_lower}: {ip} ({country})")
     return info
 
 
@@ -355,30 +338,22 @@ def get_account_proxy_info(email):
 def get_proxy_for_account(email, chat_id=None, force_new=False):
     """
     يرجّع proxy URL جاهز (يبدأ بـ http://) لاستخدامه مع requests — من غير
-    أي فحص استباقي (بينغ لـ ipify) عشان نوفّر موارد الاستضافة المجانية.
+    أي فحص استباقي (بينغ لـ ipify) عشان نوفّر موارد الاستضافة المجانية،
+    ومن غير أي رسائل تليجرام مزعجة (صامت تمامًا، بس لوج كونسول).
 
     الفلسفة: "شغل ذكي مش شغل مجهود":
-      - كل حساب بياخد بروكسي فريد ودائم (عادةً من لحظة إضافة الحساب عبر
-        ensure_account_proxy)، ومبيتشاركش مع أي حساب تاني إطلاقاً.
-      - الاستخدام الفعلي (اصطحاب مهمة) هو نفسه الفحص. لو فشل فعلاً بسبب
-        البروكسي وقت الاستخدام، الكود المستدعي بينادي هنا بـ force_new=True
-        فيتغيّر البروكسي — وده بيحصل بس وقت الحاجة الحقيقية.
+      - البروكسي بيتجهّز فقط لحظة وجود مهمة فعلاً ومحاولة اصطحابها —
+        مفيش أي اعتماد أو تجهيز بروكسي قبل كده إطلاقاً.
+      - كل حساب بياخد بروكسي فريد ودائم، ومبيتشاركش مع أي حساب تاني.
+      - لو البروكسي فشل فعلاً وقت الاصطحاب، الكود المستدعي بينادي هنا
+        بـ force_new=True فيتغيّر البروكسي بصمت.
     """
     email_lower = email.lower().strip()
 
     if force_new:
         with proxy_lock:
             assigned_proxies.pop(email_lower, None)
-        if chat_id:
-            try:
-                bot.send_message(
-                    chat_id,
-                    f"⚠️ **تبديل بروكسي**\n\n"
-                    f"👤 الحساب: {email_lower.split('@')[0]}\n"
-                    f"🔁 البروكسي القديم فشل في الاتصال، جاري تعيين بروكسي جديد..."
-                )
-            except Exception:
-                pass
+        print(f"[PROXY] البروكسي القديم لحساب {email_lower} فشل — جاري تعيين بديل بصمت.")
         info = ensure_account_proxy(email_lower, chat_id=chat_id)
         return _build_proxy_url(info["proxy"]) if info else None
 
@@ -1537,13 +1512,6 @@ def _handle_message_inner(message):
                 with logged_out_lock:
                     if chat_id in logged_out_accounts:
                         logged_out_accounts[chat_id].discard(email_lower)
-                # 🌐 جهّز بروكسي دائم وفريد لهذا الحساب فورًا (في الخلفية) —
-                # هيتحدد بلد الـ IP وييتبعت تنبيه لما يخلص.
-                threading.Thread(
-                    target=ensure_account_proxy,
-                    args=(email_lower,), kwargs={"chat_id": chat_id},
-                    daemon=True
-                ).start()
                 remove_kb = types.ReplyKeyboardRemove()
                 bot.send_message(chat_id, "✅", reply_markup=remove_kb)
                 bot.send_message(
