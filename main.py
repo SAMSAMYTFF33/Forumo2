@@ -70,16 +70,15 @@ TAKE_COOLDOWN = 60
 # ==========================================
 
 # ⚠️ حط المفتاح كـ environment variable، متسيبوش مكتوب هنا في الكود:
-#     export PROXYSCRAPE_API_KEY="مفتاحك"
+#     export PROXYSCRAPE_API_KEY="JZ3pweHyZZ9jQm8UnreSczl8vQxwf5tFE7k4aHyd0b6dSm3nSYO6cmgDrh0HqSTR"
 # (بما إن المفتاح ظهر قبل كده في المحادثة، يُفضّل تعمل Regenerate له من لوحة ProxyScrape)
-PROXYSCRAPE_API_KEY = os.environ.get("PROXYSCRAPE_API_KEY", "JZ3pweHyZZ9jQm8UnreSczl8vQxwf5tFE7k4aHyd0b6dSm3nSYO6cmgDrh0HqSTR")
+PROXYSCRAPE_API_KEY = os.environ.get("PROXYSCRAPE_API_KEY", "")
 
 PROXYSCRAPE_BASE          = "https://api.proxyscrape.com"
 PROXY_TEST_URL            = "https://api.ipify.org?format=json"
 PROXY_TEST_TIMEOUT        = 6
 PROXY_TEST_WORKERS        = 20
 PROXY_ASSIGNMENTS_FILE    = "account_proxies.json"
-PROXY_POOL_MIN_SIZE       = 5      # لو المخزون قل عن كده، نجيب دفعة جديدة عند الحاجة فقط
 
 proxy_lock          = threading.Lock()
 assigned_proxies    = {}   # { email_lower: "ip:port" أو "ip:port:user:pass" }
@@ -194,26 +193,61 @@ def _test_many(proxies):
     return alive
 
 
+def _target_proxy_count():
+    """عدد البروكسيات المطلوب = عدد الحسابات المحفوظة على البوت (مش أكتر).
+    لو مسجل 3 حسابات مثلاً، فبمجرد ما نلاقي 3 بروكسيات شغالة نوقف الفحص."""
+    emails = set()
+    for accs in local_multi_accounts.values():
+        for acc in accs:
+            emails.add(acc['email'].lower().strip())
+    return max(len(emails), 1)
+
+
 def refresh_proxy_pool():
-    """يجيب بروكسيات جديدة (مجانية + بروكسيات حسابك المدفوعة لو متاحة)،
-    يختبرها، ويضيف الشغّالة منها لمخزون الاحتياط (بدون تكرار مع المعيّن فعلاً)."""
+    """يجيب بروكسيات جديدة ويختبرها، ويوقف الفحص فوراً بمجرد ما يوصل عدد
+    البروكسيات الشغّالة (المعيّنة + المتاحة في المخزون) لعدد الحسابات —
+    مفيش داعي نفحص أكتر من كده."""
     global working_proxy_pool
-    candidates = _fetch_free_proxies()
+
+    target = _target_proxy_count()
+    with proxy_lock:
+        have = len(working_proxy_pool) + len(assigned_proxies)
+    if have >= target:
+        print(f"[PROXY] عدد البروكسيات الشغالة ({have}) يكفي عدد الحسابات ({target}) — تخطي الفحص.")
+        return
+
+    candidates = _fetch_free_proxies(limit=max(target * 10, 50))
     if PROXYSCRAPE_API_KEY:
         candidates += _fetch_account_proxies()
     candidates = list(dict.fromkeys(candidates))
     if not candidates:
         print("[PROXY] لا توجد بروكسيات جديدة لجلبها الآن.")
         return
-    alive = _test_many(candidates)
-    with proxy_lock:
-        used     = set(assigned_proxies.values())
-        pool_set = set(working_proxy_pool)
-        for p in alive:
-            if p not in used and p not in pool_set:
-                working_proxy_pool.append(p)
-    print(f"[PROXY] تحديث المخزون: {len(alive)} شغال من أصل {len(candidates)} — "
-          f"المتاح الآن: {len(working_proxy_pool)}")
+
+    found = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=PROXY_TEST_WORKERS) as ex:
+        futures = [ex.submit(_test_proxy, p) for p in candidates]
+        for fut in concurrent.futures.as_completed(futures):
+            try:
+                proxy_str, ok = fut.result()
+            except Exception:
+                continue
+            if ok:
+                with proxy_lock:
+                    used     = set(assigned_proxies.values())
+                    pool_set = set(working_proxy_pool)
+                    if proxy_str not in used and proxy_str not in pool_set:
+                        working_proxy_pool.append(proxy_str)
+                        found += 1
+                    have_now = len(working_proxy_pool) + len(assigned_proxies)
+                if have_now >= target:
+                    # وصلنا للعدد المطلوب — نوقف فحص أي بروكسيات باقية فوراً
+                    for f in futures:
+                        f.cancel()
+                    break
+
+    print(f"[PROXY] تم العثور على {found} بروكسي جديد شغال — "
+          f"المتاح الآن: {len(working_proxy_pool)} (الهدف: {target})")
 
 
 def get_proxy_for_account(email, chat_id=None, force_new=False):
@@ -250,7 +284,7 @@ def get_proxy_for_account(email, chat_id=None, force_new=False):
             return _build_proxy_url(current)
 
     with proxy_lock:
-        need_refill = len(working_proxy_pool) < PROXY_POOL_MIN_SIZE
+        need_refill = (len(working_proxy_pool) + len(assigned_proxies)) < _target_proxy_count()
     if need_refill:
         refresh_proxy_pool()
 
@@ -280,12 +314,12 @@ def get_proxy_for_account(email, chat_id=None, force_new=False):
 
 
 def _init_proxy_system():
-    """تحميل التعيينات المحفوظة + تعبئة أولية للمخزون — مرة واحدة عند الإقلاع فقط.
-    مفيش أي Thread أو Timer دوري بعد كده؛ كل حاجة بتحصل عند الحاجة الفعلية
-    (lazy) عشان نوفر موارد الاستضافة المجانية."""
+    """تحميل التعيينات المحفوظة + تعبئة أولية للمخزون — بتشتغل في Thread
+    منفصل عن استقبال رسائل البوت، عشان البوت يرد فوراً على /start حتى لو
+    فحص البروكسيات لسه شغال في الخلفية."""
     _load_proxy_assignments()
     with proxy_lock:
-        need_refill = len(working_proxy_pool) < PROXY_POOL_MIN_SIZE
+        need_refill = (len(working_proxy_pool) + len(assigned_proxies)) < _target_proxy_count()
     if need_refill:
         refresh_proxy_pool()
 
@@ -598,21 +632,8 @@ def get_site_data(username, password, chat_id):
     session = get_authenticated_session(username, password, chat_id)
     if not session:
         return None, "AUTH_FAILED"
-    email_lower = username.lower().strip()
     try:
-        try:
-            r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
-        except Exception as e:
-            if _is_proxy_error(e):
-                # البروكسي فشل وقت سحب المهام فعلاً — بدّله وأعد المحاولة مرة واحدة
-                retry_proxy = get_proxy_for_account(email_lower, chat_id=chat_id, force_new=True)
-                if retry_proxy:
-                    session.proxies = {"http": retry_proxy, "https": retry_proxy}
-                    r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
-                else:
-                    return None, "ERROR"
-            else:
-                raise
+        r = _safe_get(TARGET_URL, session=session, headers=HEADERS, timeout=12)
         page_state = detect_page_state(r.text)
         if page_state == "blocked":
             threading.Thread(target=handle_blocked_account,
@@ -1013,6 +1034,9 @@ def _bg_process_one_account_inner(chat_id, email, password, current_time):
                                         )
                                     except Exception:
                                         pass
+                                # ↩️ رجّع الجلسة لاتصال عادي بعد محاولة الاصطحاب —
+                                # البروكسي بيتفعّل بس لحظة الاصطحاب نفسها.
+                                session.proxies = {}
                             break
 
 def global_background_worker():
@@ -1512,9 +1536,11 @@ def watchdog_thread():
 if __name__ == "__main__":
     print("🚀 تشغيل البوت...")
 
-    # تحميل تعيينات البروكسي + تعبئة أولية بسيطة للمخزون — مرة واحدة بس،
-    # مفيش أي Thread دوري بيشتغل باستمرار (توفيراً لموارد الاستضافة المجانية).
-    _init_proxy_system()
+    # تحميل تعيينات البروكسي + تعبئة أولية للمخزون — في Thread منفصل تمامًا،
+    # عشان الفحص (اللي بيعتمد على الإنترنت) ميعطلش استقبال رسائل تليجرام.
+    # البوت هيرد فورًا على /start حتى لو الفحص لسه شغال في الخلفية.
+    t_proxy_init = threading.Thread(target=_init_proxy_system, daemon=True)
+    t_proxy_init.start()
 
     t_worker = threading.Thread(target=global_background_worker, daemon=True)
     t_worker.start()
