@@ -72,7 +72,7 @@ TAKE_COOLDOWN = 60
 # ⚠️ حط المفتاح كـ environment variable، متسيبوش مكتوب هنا في الكود:
 #     export PROXYSCRAPE_API_KEY="JZ3pweHyZZ9jQm8UnreSczl8vQxwf5tFE7k4aHyd0b6dSm3nSYO6cmgDrh0HqSTR"
 # (بما إن المفتاح ظهر قبل كده في المحادثة، يُفضّل تعمل Regenerate له من لوحة ProxyScrape)
-PROXYSCRAPE_API_KEY = os.environ.get("PROXYSCRAPE_API_KEY", "")
+PROXYSCRAPE_API_KEY = os.environ.get("PROXYSCRAPE_API_KEY", "JZ3pweHyZZ9jQm8UnreSczl8vQxwf5tFE7k4aHyd0b6dSm3nSYO6cmgDrh0HqSTR")
 
 PROXYSCRAPE_BASE          = "https://api.proxyscrape.com"
 PROXY_TEST_URL            = "https://api.ipify.org?format=json"
