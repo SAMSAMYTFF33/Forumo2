@@ -85,8 +85,8 @@ ACCOUNT_PROXIES = {
     ]
 }
 
-PROXY_USER = "nbrhdwnj"
-PROXY_PASS = "0tppl9zac913"
+PROXY_USER = "dwzxxjfl"
+PROXY_PASS = "e1in83kj5c8x"
 
 def check_single_exempt_proxy(prx):
     """دالة فرعية لفحص البروكسي الثابت وإرجاع الوقت والـ URL"""
