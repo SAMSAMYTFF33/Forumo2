@@ -674,6 +674,10 @@ def get_main_menu(chat_id):
     markup.add(types.InlineKeyboardButton(
         "🎯 اصطحاب للعمل (GT / GTE)", callback_data="take_work_menu"
     ))
+    # ✅ الزر الجديد
+    markup.add(types.InlineKeyboardButton(
+        "🔑 USER - PROXY", callback_data="proxy_info"
+    ))
     return markup
 
 def get_switch_account_menu(chat_id):
@@ -884,9 +888,11 @@ def _handle_callback_inner(call):
     data       = call.data
     message_id = call.message.message_id
 
+    # إلغاء أي جلسة لتغيير البروكسي إذا ضغط المستخدم على أي زر آخر
     if chat_id in user_sessions:
         step = user_sessions[chat_id].get('step', '')
-        if step in ['WAITING_EMAIL', 'WAITING_PASSWORD', 'WAITING_DELETE_ACCOUNT']:
+        if step in ['WAITING_EMAIL', 'WAITING_PASSWORD', 'WAITING_DELETE_ACCOUNT',
+                    'CHANGE_PROXY_USER', 'CHANGE_PROXY_PASS']:
             del user_sessions[chat_id]
 
     if data.startswith("switch_acc_"):
@@ -1136,6 +1142,36 @@ def _handle_callback_inner(call):
         except Exception:
             pass
 
+    # ✅ معالجة زر USER - PROXY
+    elif data == "proxy_info":
+        bot.answer_callback_query(call.id)
+        msg = (
+            "🔑 **معلومات البروكسي الحالية**\n\n"
+            f"👤 **اسم المستخدم:** `{PROXY_USER}`\n"
+            f"🔒 **كلمة المرور:** `{PROXY_PASS}`\n"
+            "ــــــــــــــــــ"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("✏️ تغيير البيانات", callback_data="change_proxy"))
+        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="back_main"))
+        try:
+            bot.edit_message_text(msg, chat_id, message_id,
+                                  parse_mode="Markdown", reply_markup=markup)
+        except Exception:
+            pass
+
+    # ✅ معالجة زر تغيير البروكسي
+    elif data == "change_proxy":
+        bot.answer_callback_query(call.id)
+        if chat_id in user_transient_messages:
+            try:
+                bot.delete_message(chat_id, user_transient_messages[chat_id])
+            except Exception:
+                pass
+        msg = bot.send_message(chat_id, "📝 أدخل **اسم المستخدم الجديد** للبروكسي:")
+        user_transient_messages[chat_id] = msg.message_id
+        user_sessions[chat_id] = {'step': 'CHANGE_PROXY_USER'}
+
 # ==========================================
 # 📨 معالجة الرسائل
 # ==========================================
@@ -1285,6 +1321,52 @@ def _handle_message_inner(message):
                 f"✅ **تم حذف الحساب {label_del} نهائياً**",
                 parse_mode="Markdown",
                 reply_markup=get_switch_account_menu(chat_id)
+            )
+            return
+
+        # ✅ معالجة خطوة تغيير اسم مستخدم البروكسي
+        elif step == 'CHANGE_PROXY_USER':
+            if chat_id in user_transient_messages:
+                try:
+                    bot.delete_message(chat_id, user_transient_messages[chat_id])
+                except Exception:
+                    pass
+            new_proxy_user = text.strip()
+            if not new_proxy_user:
+                bot.send_message(chat_id, "⚠️ يجب إدخال اسم مستخدم غير فارغ.")
+                return
+            user_sessions[chat_id]['new_proxy_user'] = new_proxy_user
+            user_sessions[chat_id]['step'] = 'CHANGE_PROXY_PASS'
+            msg = bot.send_message(chat_id, "🔐 الآن أدخل **كلمة المرور الجديدة** للبروكسي:")
+            user_transient_messages[chat_id] = msg.message_id
+            return
+
+        # ✅ معالجة خطوة تغيير كلمة مرور البروكسي
+        elif step == 'CHANGE_PROXY_PASS':
+            if chat_id in user_transient_messages:
+                try:
+                    bot.delete_message(chat_id, user_transient_messages[chat_id])
+                except Exception:
+                    pass
+            new_proxy_pass = text.strip()
+            if not new_proxy_pass:
+                bot.send_message(chat_id, "⚠️ يجب إدخال كلمة مرور غير فارغة.")
+                return
+            new_proxy_user = user_sessions[chat_id].get('new_proxy_user')
+            del user_sessions[chat_id]
+
+            # ✅ تحديث المتغيرات العامة فعلياً
+            global PROXY_USER, PROXY_PASS
+            PROXY_USER = new_proxy_user
+            PROXY_PASS = new_proxy_pass
+
+            bot.send_message(
+                chat_id,
+                f"✅ **تم تحديث بيانات البروكسي بنجاح!**\n\n"
+                f"👤 **اسم المستخدم الجديد:** `{PROXY_USER}`\n"
+                f"🔒 **كلمة المرور الجديدة:** `{PROXY_PASS}`",
+                parse_mode="Markdown",
+                reply_markup=get_main_menu(chat_id)
             )
             return
 
